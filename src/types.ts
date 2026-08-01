@@ -35,4 +35,27 @@ export interface BotStatus {
     tag: string | null;
     startedAt: string | null;
     guilds: string[];
+    configuredServerId: string | null;
+}
+
+export interface RuntimeConfig {
+    discordToken: string | null;
+    serverId: string | null;
+    diagnosticsPort: number;
+    printerName: string | null;
+}
+
+export interface PublicRuntimeConfig {
+    hasDiscordToken: boolean;
+    serverId: string | null;
+    diagnosticsPort: number;
+    printerName: string | null;
+    configPath: string;
+}
+
+export interface RuntimeConfigPatch {
+    discordToken?: string | null;
+    serverId?: string | null;
+    diagnosticsPort?: number;
+    printerName?: string | null;
 }

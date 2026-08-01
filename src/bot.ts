@@ -1,12 +1,13 @@
 import {
     Client,
     GatewayIntentBits,
+    type Guild,
     type Message,
     type TextChannel,
 } from 'discord.js';
-import { commands } from './commands/index.js';
-import { logEvent, status } from './server.js';
-import type { CommandContext } from './types.js';
+import { commands } from './commands/index.ts';
+import { logEvent, status } from './server.ts';
+import type { CommandContext } from './types.ts';
 
 const COMMAND_PREFIX = '!';
 const SUCCESS_EMOJI = '✅';
@@ -14,8 +15,10 @@ const ERROR_EMOJI = '❌';
 
 export class HouseholdBot {
     private readonly client: Client;
+    private readonly getConfiguredServerId: () => string | null;
 
-    constructor() {
+    constructor(getConfiguredServerId: () => string | null) {
+        this.getConfiguredServerId = getConfiguredServerId;
         this.client = new Client({
             intents: [
                 GatewayIntentBits.Guilds,
@@ -38,9 +41,12 @@ export class HouseholdBot {
         status.connected = true;
         status.tag = botUser.tag;
         status.startedAt = new Date().toISOString();
-        status.guilds = [...this.client.guilds.cache.values()].map(g => g.name);
+        status.configuredServerId = this.getConfiguredServerId();
 
-        logEvent('startup', `Logged in as ${botUser.tag}; in guilds: ${status.guilds.join(', ')}`);
+        const targetGuilds = this.getTargetGuilds();
+        status.guilds = targetGuilds.map(g => g.name);
+
+        logEvent('startup', `Logged in as ${botUser.tag}; in guilds: ${status.guilds.join(', ') || 'none'}`);
         logEvent('info', `Loaded commands: ${commands.map(c => `!${c.name}`).join(', ')}`);
 
         await this.scanForUnhandledMessages();
@@ -56,7 +62,7 @@ export class HouseholdBot {
         let scanned = 0;
         let processed = 0;
 
-        for (const guild of this.client.guilds.cache.values()) {
+        for (const guild of this.getTargetGuilds()) {
             const channels = await guild.channels.fetch();
             for (const channel of channels.values()) {
                 if (!channel?.isTextBased()) continue;
@@ -82,6 +88,23 @@ export class HouseholdBot {
         logEvent('info', `Startup scan complete — scanned ${scanned} messages, processed ${processed} new actions`);
     }
 
+    private getTargetGuilds(): Guild[] {
+        const configuredServerId = this.getConfiguredServerId();
+        status.configuredServerId = configuredServerId;
+
+        if (!configuredServerId) {
+            return [...this.client.guilds.cache.values()];
+        }
+
+        const guild = this.client.guilds.cache.get(configuredServerId);
+        if (!guild) {
+            logEvent('error', `Configured serverId ${configuredServerId} not found in connected guilds`);
+            return [];
+        }
+
+        return [guild];
+    }
+
     private async onMessage(message: Message): Promise<void> {
         await this.processMessage(message);
     }
@@ -93,6 +116,8 @@ export class HouseholdBot {
      */
     private async processMessage(message: Message): Promise<boolean> {
         if (message.author.bot) return false;
+        const configuredServerId = this.getConfiguredServerId();
+        if (configuredServerId && message.guildId !== configuredServerId) return false;
         if (!message.content.startsWith(COMMAND_PREFIX)) return false;
 
         const afterPrefix = message.content.slice(COMMAND_PREFIX.length).trim();

@@ -2,7 +2,7 @@ import { exec } from 'child_process';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import type { BotCommand } from '../types.js';
+import type { BotCommand } from '../types.ts';
 
 /**
  * Prints text to the configured CUPS printer.
