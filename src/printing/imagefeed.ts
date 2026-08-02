@@ -1,4 +1,4 @@
-import { Jimp, loadFont, measureText, JimpMime } from 'jimp';
+import { Jimp, loadFont, measureText, JimpMime, ResizeStrategy } from 'jimp';
 import QRCode from 'qrcode';
 import type { PrintJob } from '../types.ts';
 
@@ -76,6 +76,7 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
     // First pass: measure total height
     let estimatedHeight = MARGIN * 2;
     if (job.header) estimatedHeight += LINE_HEIGHT_LARGE * 2 + 12;
+    if (job.iconPath) estimatedHeight += 160 + 8; // scaled sprite
     for (const line of job.lines) {
         const wrapped = wrapText(line || ' ', bodyFont, TEXT_WIDTH);
         estimatedHeight += wrapped.length * lineHeight;
@@ -102,6 +103,19 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
             y += LINE_HEIGHT_LARGE;
         }
         y += 12;
+    }
+
+    // Icon / sprite image
+    if (job.iconPath) {
+        try {
+            const sprite = await Jimp.read(job.iconPath);
+            const scale = Math.floor(160 / sprite.width) || 1;
+            sprite.resize({ w: sprite.width * scale, h: sprite.height * scale, mode: ResizeStrategy.NEAREST_NEIGHBOR });
+            img.composite(sprite, MARGIN, y);
+            y += sprite.height + 8;
+        } catch {
+            // silently skip
+        }
     }
 
     // Primary text

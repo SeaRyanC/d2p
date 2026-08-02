@@ -1,5 +1,6 @@
-import { Printer, InMemory, Style, Align, Cut } from 'escpos-buffer';
+import { Printer, InMemory, Style, Align, Cut, Image } from 'escpos-buffer';
 import { SerialPort } from 'serialport';
+import { Jimp, ResizeStrategy } from 'jimp';
 import type { PrintJob } from '../types.ts';
 
 const COLS_NORMAL = 48;
@@ -50,6 +51,21 @@ export async function buildEscpBuffer(job: PrintJob): Promise<Buffer> {
             await printer.writeln(line, Style.Bold | Style.DoubleWidth | Style.DoubleHeight, Align.Center);
         }
         await printer.feed(1);
+    }
+
+    // Icon / sprite image
+    if (job.iconPath) {
+        try {
+            const img = await Jimp.read(job.iconPath);
+            // Scale up with nearest-neighbor for crisp pixel art; target ~160px wide
+            const scale = Math.floor(160 / img.width) || 1;
+            img.resize({ w: img.width * scale, h: img.height * scale, mode: ResizeStrategy.NEAREST_NEIGHBOR });
+            const escImage = new Image(img.bitmap as { width: number; height: number; data: Buffer });
+            await printer.draw(escImage);
+            await printer.feed(1);
+        } catch {
+            // silently skip if image can't be loaded/printed
+        }
     }
 
     // Primary text

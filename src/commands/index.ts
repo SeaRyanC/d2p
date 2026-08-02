@@ -1,5 +1,6 @@
 import { debugFail } from "./debug-fail.ts";
 import { helloWorld } from "./hello-world.ts";
+import { printPokemon } from "./pokemon.ts";
 import { printSudoku } from "./sudoku.ts";
 import { printWordsearch } from "./wordsearch.ts";
 import type { PrintJob } from "../types.ts";
@@ -29,5 +30,6 @@ export const Commands = [
     helloWorld,
     printSudoku,
     printWordsearch,
+    printPokemon,
     debugFail
 ] as const satisfies ReadonlyArray<Command>;
