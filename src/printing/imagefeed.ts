@@ -76,7 +76,7 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
     // First pass: measure total height
     let estimatedHeight = MARGIN * 2;
     if (job.header) estimatedHeight += LINE_HEIGHT_LARGE * 2 + 12;
-    if (job.iconPath) estimatedHeight += 160 + 8; // scaled sprite
+    if (job.iconPath) estimatedHeight += 560 + 8; // scaled sprite (40px * 14 scale)
     for (const line of job.lines) {
         const wrapped = wrapText(line || ' ', bodyFont, TEXT_WIDTH);
         estimatedHeight += wrapped.length * lineHeight;
@@ -109,7 +109,7 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
     if (job.iconPath) {
         try {
             const sprite = await Jimp.read(job.iconPath);
-            const scale = Math.floor(160 / sprite.width) || 1;
+            const scale = Math.floor(520 / sprite.width) || 1; // fill paper width in image feed preview
             sprite.resize({ w: sprite.width * scale, h: sprite.height * scale, mode: ResizeStrategy.NEAREST_NEIGHBOR });
             img.composite(sprite, MARGIN, y);
             y += sprite.height + 8;
