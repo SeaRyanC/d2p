@@ -8,7 +8,6 @@ import {
     checkPassword,
     hashPassword,
     getConfigFilePath,
-    toPublicConfig,
 } from './config.ts';
 import { getConnectedPrinter, printTestPage } from './printer.ts';
 import type { DiagnosticEvent, BotStatus } from './types.ts';
@@ -147,6 +146,12 @@ export function setDiscordChannels(channels: Array<{ id: string; name: string }>
     discordChannels = channels;
 }
 
+let _restartHandler: (() => Promise<void>) | null = null;
+
+export function setRestartHandler(fn: () => Promise<void>): void {
+    _restartHandler = fn;
+}
+
 export function startDiagnosticsServer(port: number): void {
     const server = createServer(async (req, res) => {
         try {
@@ -185,7 +190,15 @@ export function startDiagnosticsServer(port: number): void {
 
             // ── Config ───────────────────────────────────────────────────────
             if (method === 'GET' && urlPath === '/api/config') {
-                sendJson(res, 200, toPublicConfig(getConfigFilePath()));
+                const cfg = getCurrentConfig();
+                sendJson(res, 200, {
+                    discordToken: cfg.discordToken ?? '',
+                    openaiKey: cfg.openaiKey ?? '',
+                    serverId: cfg.serverId ?? null,
+                    diagnosticsPort: cfg.diagnosticsPort,
+                    channels: cfg.channels,
+                    configPath: getConfigFilePath(),
+                });
                 return;
             }
 
@@ -216,7 +229,15 @@ export function startDiagnosticsServer(port: number): void {
                 }
 
                 await updateConfig(patch as Parameters<typeof updateConfig>[0]);
-                sendJson(res, 200, toPublicConfig(getConfigFilePath()));
+                const updated = getCurrentConfig();
+                sendJson(res, 200, {
+                    discordToken: updated.discordToken ?? '',
+                    openaiKey: updated.openaiKey ?? '',
+                    serverId: updated.serverId ?? null,
+                    diagnosticsPort: updated.diagnosticsPort,
+                    channels: updated.channels,
+                    configPath: getConfigFilePath(),
+                });
                 return;
             }
 
@@ -281,6 +302,16 @@ export function startDiagnosticsServer(port: number): void {
                 await printTestPage(printerName);
                 logEvent('print', 'Test page printed');
                 sendJson(res, 200, { ok: true });
+                return;
+            }
+
+            // ── Restart ───────────────────────────────────────────────────────
+            if (method === 'POST' && urlPath === '/api/restart') {
+                logEvent('info', 'Restart requested via API');
+                sendJson(res, 200, { ok: true });
+                if (_restartHandler) {
+                    void _restartHandler();
+                }
                 return;
             }
 

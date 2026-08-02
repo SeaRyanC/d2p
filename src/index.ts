@@ -1,17 +1,18 @@
 import { loadConfig, getCurrentConfig } from './config.ts';
-import { logEvent, startDiagnosticsServer, setDiscordChannels } from './server.ts';
-import { WindsorBot, checkScheduledTasks } from './bot.ts';
+import { logEvent, startDiagnosticsServer, setDiscordChannels, setRestartHandler } from './server.ts';
+import { createWindsorBot, checkScheduledTasks } from './bot.ts';
+import { ChannelType } from 'discord.js';
 
 const { configPath } = await loadConfig();
 const config = getCurrentConfig();
 
 startDiagnosticsServer(config.diagnosticsPort);
 
-let bot: WindsorBot | null = null;
+let bot: ReturnType<typeof createWindsorBot> | null = null;
 let startInFlight = false;
 
-async function maybeStartBot(): Promise<void> {
-    if (startInFlight || bot) return;
+async function startBot(): Promise<void> {
+    if (startInFlight) return;
     const cfg = getCurrentConfig();
     if (!cfg.discordToken) {
         logEvent('info', 'No Discord token configured. Visit the control panel to set up.');
@@ -19,7 +20,7 @@ async function maybeStartBot(): Promise<void> {
     }
 
     startInFlight = true;
-    const nextBot = new WindsorBot();
+    const nextBot = createWindsorBot();
     try {
         await nextBot.start(cfg.discordToken);
         bot = nextBot;
@@ -30,7 +31,12 @@ async function maybeStartBot(): Promise<void> {
         for (const guild of guilds) {
             const fetched = await guild.channels.fetch();
             for (const ch of fetched.values()) {
-                if (ch?.isTextBased() && 'name' in ch) {
+                if (
+                    ch?.isTextBased() &&
+                    'name' in ch &&
+                    ch.type !== ChannelType.GuildVoice &&
+                    ch.type !== ChannelType.GuildStageVoice
+                ) {
                     channels.push({ id: ch.id, name: (ch as { name: string }).name });
                 }
             }
@@ -45,9 +51,21 @@ async function maybeStartBot(): Promise<void> {
     }
 }
 
+export async function restartBot(): Promise<void> {
+    logEvent('info', 'Restarting bot…');
+    if (bot) {
+        bot.destroy();
+        bot = null;
+    }
+    setDiscordChannels([]);
+    await loadConfig();
+    await startBot();
+}
+
 // Recurring task checker
 setInterval(() => {
     checkScheduledTasks();
 }, 30_000);
 
-await maybeStartBot();
+setRestartHandler(restartBot);
+await startBot();

@@ -1,4 +1,5 @@
 import {
+    ChannelType,
     Client,
     GatewayIntentBits,
     type Guild,
@@ -109,63 +110,93 @@ function isPrintTrigger(content: string): boolean {
     return content.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'print';
 }
 
-// ─── Main bot class ───────────────────────────────────────────────────────────
+// ─── Bot interface ────────────────────────────────────────────────────────────
 
-export class WindsorBot {
-    private readonly client: Client;
+export interface WindsorBotHandle {
+    start(token: string): Promise<void>;
+    destroy(): void;
+    getClient(): Client;
+    handleImmediatePrint(message: Message, config: ImmediatePrintConfig): Promise<void>;
+    handleAccumulatingPrint(triggerMessage: Message, config: AccumulatingListConfig, allMessages: Message[]): Promise<void>;
+    handleRecurringSetup(message: Message, config: RecurringPrintConfig): Promise<void>;
+    executeRecurringTask(scheduleReply: Message, config: RecurringPrintConfig): Promise<void>;
+    advanceRecurring(scheduleReply: Message, latestStatusReply: Message, config: RecurringPrintConfig): Promise<void>;
+    handleOnDemand(message: Message): Promise<void>;
+}
 
-    constructor() {
-        this.client = new Client({
-            intents: [
-                GatewayIntentBits.Guilds,
-                GatewayIntentBits.GuildMessages,
-                GatewayIntentBits.MessageContent,
-                GatewayIntentBits.GuildMessageReactions,
-            ],
-        });
+// ─── Bot factory ──────────────────────────────────────────────────────────────
 
-        this.client.on('ready', () => void this.onReady());
-        this.client.on('messageCreate', (msg) => void this.onMessage(msg));
+export function createWindsorBot(): WindsorBotHandle {
+    const client = new Client({
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildMessageReactions,
+        ],
+    });
+
+    client.on('clientReady', () => void onReady());
+    client.on('messageCreate', (msg) => void onMessage(msg));
+
+    const bot: WindsorBotHandle = {
+        start,
+        destroy,
+        getClient,
+        handleImmediatePrint,
+        handleAccumulatingPrint,
+        handleRecurringSetup,
+        executeRecurringTask,
+        advanceRecurring,
+        handleOnDemand,
+    };
+
+    async function start(token: string): Promise<void> {
+        await client.login(token);
     }
 
-    async start(token: string): Promise<void> {
-        await this.client.login(token);
+    function destroy(): void {
+        client.destroy();
     }
 
-    destroy(): void {
-        this.client.destroy();
+    function getClient(): Client {
+        return client;
     }
 
-    getClient(): Client {
-        return this.client;
+    function isTextOnlyChannel(ch: { isTextBased(): boolean; type: ChannelType }): boolean {
+        return ch.isTextBased()
+            && ch.type !== ChannelType.GuildVoice
+            && ch.type !== ChannelType.GuildStageVoice
+            && ch.type !== ChannelType.GuildForum
+            && ch.type !== ChannelType.GuildMedia;
     }
 
-    private async onReady(): Promise<void> {
-        const botUser = this.client.user!;
+    async function onReady(): Promise<void> {
+        const botUser = client.user!;
         status.connected = true;
         status.tag = botUser.tag;
         status.startedAt = new Date().toISOString();
         status.configuredServerId = getCurrentConfig().serverId ?? null;
-        status.guilds = [...this.client.guilds.cache.values()].map(g => g.name);
+        status.guilds = [...client.guilds.cache.values()].map(g => g.name);
 
         logEvent('startup', `Connected as ${botUser.tag}`);
 
-        const guilds = this.getTargetGuilds();
+        const guilds = getTargetGuilds();
         for (const guild of guilds) {
             const channels = await guild.channels.fetch();
             const textChannels = [...channels.values()]
-                .filter(c => c?.isTextBased())
-                .map(c => ({ id: c!.id, name: (c as TextChannel).name }));
+                .filter((c): c is NonNullable<typeof c> => c !== null && isTextOnlyChannel(c))
+                .map(c => ({ id: c.id, name: (c as TextChannel).name }));
             await reconcileChannels(textChannels);
         }
 
-        await this.startupScan();
+        await startupScan();
     }
 
-    private getTargetGuilds(): Guild[] {
+    function getTargetGuilds(): Guild[] {
         const serverId = getCurrentConfig().serverId;
-        if (!serverId) return [...this.client.guilds.cache.values()];
-        const guild = this.client.guilds.cache.get(serverId);
+        if (!serverId) return [...client.guilds.cache.values()];
+        const guild = client.guilds.cache.get(serverId);
         if (!guild) {
             logEvent('error', `Configured serverId ${serverId} not found`);
             return [];
@@ -173,10 +204,10 @@ export class WindsorBot {
         return [guild];
     }
 
-    private async startupScan(): Promise<void> {
+    async function startupScan(): Promise<void> {
         logEvent('info', 'Starting startup scan...');
         const config = getCurrentConfig();
-        const guilds = this.getTargetGuilds();
+        const guilds = getTargetGuilds();
 
         for (const guild of guilds) {
             const channels = await guild.channels.fetch();
@@ -192,7 +223,7 @@ export class WindsorBot {
                     const sorted = [...messages.values()].sort((a, b) =>
                         Number(BigInt(a.id) - BigInt(b.id))
                     );
-                    await this.processBehaviorStartup(textCh, mapping.config, sorted);
+                    await processBehaviorStartup(textCh, mapping.config, sorted);
                 } catch (err) {
                     logEvent('error', `Startup scan failed for #${textCh.name}: ${err}`);
                 }
@@ -201,39 +232,37 @@ export class WindsorBot {
         logEvent('info', 'Startup scan complete');
     }
 
-    private async processBehaviorStartup(
+    async function processBehaviorStartup(
         channel: TextChannel,
         config: ChannelBehaviorConfig,
         messages: Message[],
     ): Promise<void> {
-        const botId = this.client.user?.id;
+        const botId = client.user?.id;
 
         switch (config.type) {
             case 'immediate-print': {
                 for (const msg of messages) {
                     if (msg.author.bot) continue;
-                    if (msg.reference) continue; // skip replies
+                    if (msg.reference) continue;
                     if (msg.author.id === botId) continue;
                     if (await hasAnyReaction(msg)) continue;
-                    await this.handleImmediatePrint(msg, config);
+                    await handleImmediatePrint(msg, config);
                 }
                 break;
             }
             case 'accumulating-list': {
-                // Find print triggers that don't have ✅, re-process them
                 for (const msg of messages) {
                     if (msg.author.bot) continue;
                     if (msg.reference) continue;
                     if (msg.author.id === botId) continue;
                     if (!isPrintTrigger(msg.content)) continue;
                     if (await hasAnyReaction(msg)) continue;
-                    // Also retry ⏸️ reactions
-                    await this.handleAccumulatingPrint(msg, config, messages);
+                    await handleAccumulatingPrint(msg, config, messages);
                 }
                 break;
             }
             case 'recurring-print': {
-                await this.startupRecurring(channel, config, messages);
+                await startupRecurring(channel, config, messages);
                 break;
             }
             case 'on-demand': {
@@ -242,30 +271,27 @@ export class WindsorBot {
                     if (msg.reference) continue;
                     if (msg.author.id === botId) continue;
                     if (await hasAnyReaction(msg)) continue;
-                    await this.handleOnDemand(msg);
+                    await handleOnDemand(msg);
                 }
                 break;
             }
         }
     }
 
-    private async startupRecurring(
+    async function startupRecurring(
         channel: TextChannel,
         config: RecurringPrintConfig,
         messages: Message[],
     ): Promise<void> {
-        // Find bot "Got it. I will print ⟪..." replies
-        const botId = this.client.user?.id;
+        const botId = client.user?.id;
         const scheduleReplies = messages.filter(m =>
             m.author.id === botId && m.content.startsWith('Got it. I will print ⟪')
         );
 
         for (const scheduleReply of scheduleReplies) {
-            // Find the parent message
             const parentId = scheduleReply.reference?.messageId;
             if (!parentId) continue;
 
-            // Check the latest status reply for this schedule
             const statusReplies = messages.filter(m =>
                 m.author.id === botId &&
                 m.reference?.messageId === scheduleReply.id &&
@@ -275,32 +301,28 @@ export class WindsorBot {
             const latestStatus = statusReplies[statusReplies.length - 1];
 
             if (latestStatus?.content.includes('has expired')) {
-                continue; // All done
+                continue;
             }
 
             if (latestStatus && latestStatus.content.startsWith('Printed at') && !await hasReaction(latestStatus, Reaction.ok)) {
-                // Printed but no OK reaction - need to fetch next occurrence
-                await this.advanceRecurring(scheduleReply, latestStatus, config);
+                await advanceRecurring(scheduleReply, latestStatus, config);
                 continue;
             }
 
             if (!latestStatus) {
-                // No status reply yet - check if the schedule reply has ✅ (meaning it's been set up)
-                // Find when the next print should be from the schedule reply text
-                // Format: "Got it. I will print ⟪text⟫ at TIMESTAMP"
                 const match = /at (.+)$/.exec(scheduleReply.content);
                 if (!match?.[1]) continue;
                 const nextTime = new Date(match[1]);
                 if (isNaN(nextTime.getTime())) continue;
-                scheduleRecurringTask(scheduleReply, nextTime, config, this);
+                scheduleRecurringTask(scheduleReply, nextTime, config, bot);
             }
         }
     }
 
-    private async onMessage(message: Message): Promise<void> {
+    async function onMessage(message: Message): Promise<void> {
         if (message.author.bot) return;
-        if (message.reference) return; // ignore replies
-        if (message.author.id === this.client.user?.id) return;
+        if (message.reference) return;
+        if (message.author.id === client.user?.id) return;
 
         const config = getCurrentConfig();
         const mapping = config.channels.find(m => m.channelId === message.channelId);
@@ -311,7 +333,7 @@ export class WindsorBot {
 
         switch (mapping.config.type) {
             case 'immediate-print':
-                await this.handleImmediatePrint(message, mapping.config);
+                await handleImmediatePrint(message, mapping.config);
                 break;
             case 'accumulating-list': {
                 if (isPrintTrigger(message.content)) {
@@ -320,22 +342,22 @@ export class WindsorBot {
                     const sorted = [...messages.values()].sort((a, b) =>
                         Number(BigInt(a.id) - BigInt(b.id))
                     );
-                    await this.handleAccumulatingPrint(message, mapping.config, sorted);
+                    await handleAccumulatingPrint(message, mapping.config, sorted);
                 }
                 break;
             }
             case 'recurring-print':
-                await this.handleRecurringSetup(message, mapping.config);
+                await handleRecurringSetup(message, mapping.config);
                 break;
             case 'on-demand':
-                await this.handleOnDemand(message);
+                await handleOnDemand(message);
                 break;
         }
     }
 
-    // ─── Immediate Print ────────────────────────────────────────────────────────
+    // ─── Immediate Print ──────────────────────────────────────────────────────
 
-    async handleImmediatePrint(message: Message, config: ImmediatePrintConfig): Promise<void> {
+    async function handleImmediatePrint(message: Message, config: ImmediatePrintConfig): Promise<void> {
         const rawContent = message.content;
         const urls = extractUrls(rawContent);
         const textWithLinkLabels = replaceUrlsInText(rawContent, urls);
@@ -376,16 +398,15 @@ export class WindsorBot {
         }
     }
 
-    // ─── Accumulating List ──────────────────────────────────────────────────────
+    // ─── Accumulating List ────────────────────────────────────────────────────
 
-    async handleAccumulatingPrint(
+    async function handleAccumulatingPrint(
         triggerMessage: Message,
         config: AccumulatingListConfig,
         allMessages: Message[],
     ): Promise<void> {
-        const botId = this.client.user?.id;
+        const botId = client.user?.id;
 
-        // Find the previous print trigger (has ✅ reaction from bot)
         const triggerIdx = allMessages.findIndex(m => m.id === triggerMessage.id);
         const prior = allMessages.slice(0, triggerIdx).reverse();
         const prevPrintIdx = prior.findIndex(m =>
@@ -397,19 +418,14 @@ export class WindsorBot {
 
         const startIdx = prevPrintIdx === -1 ? 0 : triggerIdx - prevPrintIdx;
 
-        // Collect items between the previous print trigger and this one
         let items = allMessages.slice(startIdx, triggerIdx).filter(m =>
             !m.author.bot &&
             !m.reference &&
             m.author.id !== botId &&
-
             !isPrintTrigger(m.content)
         );
 
-        // Use latest version of edited messages (discord.js gives us current content)
-        // If 0 items, print the "previous" list (retry)
         if (items.length === 0) {
-            // Re-use items from the previous print
             if (prevPrintIdx === -1) {
                 await reactSafe(triggerMessage, Reaction.ok);
                 return;
@@ -459,9 +475,9 @@ export class WindsorBot {
         }
     }
 
-    // ─── Recurring Print ─────────────────────────────────────────────────────────
+    // ─── Recurring Print ──────────────────────────────────────────────────────
 
-    async handleRecurringSetup(message: Message, config: RecurringPrintConfig): Promise<void> {
+    async function handleRecurringSetup(message: Message, config: RecurringPrintConfig): Promise<void> {
         const rawContent = message.content;
 
         try {
@@ -477,7 +493,7 @@ export class WindsorBot {
             const reply = await replySafe(message, `Got it. I will print ⟪${parsed.message}⟫ at ${nextStr}`);
 
             if (reply) {
-                scheduleRecurringTask(reply, parsed.nextOccurrence, config, this);
+                scheduleRecurringTask(reply, parsed.nextOccurrence, config, bot);
             }
         } catch (err) {
             await reactSafe(message, Reaction.fail);
@@ -485,17 +501,13 @@ export class WindsorBot {
         }
     }
 
-    async executeRecurringTask(
+    async function executeRecurringTask(
         scheduleReply: Message,
         config: RecurringPrintConfig,
     ): Promise<void> {
-        // Extract message text from schedule reply
         const match = /⟪(.+?)⟫/.exec(scheduleReply.content);
         if (!match?.[1]) return;
         const text = match[1];
-
-        // Find the original user message to get context
-        const originalMsgId = scheduleReply.reference?.messageId;
 
         const urls = extractUrls(text);
         const textWithLinks = replaceUrlsInText(text, urls);
@@ -521,14 +533,12 @@ export class WindsorBot {
         try {
             await printJob(job);
         } catch (err) {
-            // Print failed - don't advance, will retry on next startup
             logEvent('error', `Recurring print failed: ${err}`);
             return;
         }
 
         logEvent('print', `Printed recurring task: ${text}`);
 
-        // Ask AI for next occurrence
         const originalUserMessage = scheduleReply.content.replace(/^Got it\. I will print ⟪.+?⟫ at /, '');
         const nextOccurrence = await getNextOccurrence(originalUserMessage, new Date());
 
@@ -545,16 +555,15 @@ export class WindsorBot {
         }
 
         if (nextOccurrence && statusReply) {
-            scheduleRecurringTask(scheduleReply, nextOccurrence, config, this);
+            scheduleRecurringTask(scheduleReply, nextOccurrence, config, bot);
         }
     }
 
-    async advanceRecurring(
+    async function advanceRecurring(
         scheduleReply: Message,
         latestStatusReply: Message,
         config: RecurringPrintConfig,
     ): Promise<void> {
-        // The print happened but we never got next occurrence - ask AI now
         const match = /⟪(.+?)⟫/.exec(scheduleReply.content);
         if (!match?.[1]) return;
 
@@ -567,12 +576,12 @@ export class WindsorBot {
         const nextStr = formatScheduleDate(nextOccurrence);
         await replySafe(latestStatusReply, `The next print will be at ${nextStr}.`);
         await reactSafe(latestStatusReply, Reaction.ok);
-        scheduleRecurringTask(scheduleReply, nextOccurrence, config, this);
+        scheduleRecurringTask(scheduleReply, nextOccurrence, config, bot);
     }
 
-    // ─── On-Demand ──────────────────────────────────────────────────────────────
+    // ─── On-Demand ────────────────────────────────────────────────────────────
 
-    async handleOnDemand(message: Message): Promise<void> {
+    async function handleOnDemand(message: Message): Promise<void> {
         const content = message.content.trim();
         if (!content.startsWith('!') && !content.startsWith('/')) return;
 
@@ -585,6 +594,7 @@ export class WindsorBot {
         for (const cmd of Commands) {
             if (cmd.aliases.some(a => commandName.localeCompare(a, undefined, { sensitivity: "base" }) == 0)) {
                 foundCommand = true;
+                logEvent('command', `Command '${commandName}' invoked by ${message.author.username}`);
                 const result = await cmd.invoke(args);
                 if (result.kind === 'pass') {
                     await reactSafe(message, "✅");
@@ -603,6 +613,8 @@ export class WindsorBot {
             await reactSafe(message, "❓");
         }
     }
+
+    return bot;
 }
 
 // ─── Recurring task scheduler ─────────────────────────────────────────────────
@@ -611,7 +623,7 @@ interface ScheduledTask {
     scheduleReply: Message;
     nextOccurrence: Date;
     config: RecurringPrintConfig;
-    bot: WindsorBot;
+    bot: WindsorBotHandle;
     timerId: ReturnType<typeof setTimeout>;
 }
 
@@ -621,7 +633,7 @@ export function scheduleRecurringTask(
     scheduleReply: Message,
     nextOccurrence: Date,
     config: RecurringPrintConfig,
-    bot: WindsorBot,
+    bot: WindsorBotHandle,
 ): void {
     const key = scheduleReply.id;
     const existing = scheduledTasks.get(key);

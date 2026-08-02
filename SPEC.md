@@ -177,4 +177,3 @@ Apply these revisions to the spec or readme IF APPROPRIATE
  * Don't use `class` in this project, use a function/revealing-module pattern instead
  * Server config UI should have a "Restart Server" button
  * Don't show voice channels or forum channels in the channel listing
- * 

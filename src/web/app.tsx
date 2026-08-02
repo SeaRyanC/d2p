@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 import { render } from 'preact';
 import type { JSX } from 'preact';
-import { useEffect, useState, useRef } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,8 +42,8 @@ interface StatusData {
 }
 
 interface ConfigData {
-    hasDiscordToken: boolean;
-    hasOpenaiKey: boolean;
+    discordToken: string;
+    openaiKey: string;
     serverId: string | null;
     diagnosticsPort: number;
     channels: ChannelMapping[];
@@ -239,32 +239,32 @@ function BotSetup({ config, onSave }: {
     config: ConfigData | null;
     onSave: () => void;
 }): JSX.Element {
-    const [discordToken, setDiscordToken] = useState('');
+    const [discordToken, setDiscordToken] = useState(config?.discordToken ?? '');
     const [serverId, setServerId] = useState(config?.serverId ?? '');
-    const [openaiKey, setOpenaiKey] = useState('');
+    const [openaiKey, setOpenaiKey] = useState(config?.openaiKey ?? '');
     const [diagnosticsPort, setDiagnosticsPort] = useState(String(config?.diagnosticsPort ?? 8080));
     const [msg, setMsg] = useState('');
     const [err, setErr] = useState('');
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
+        setDiscordToken(config?.discordToken ?? '');
         setServerId(config?.serverId ?? '');
+        setOpenaiKey(config?.openaiKey ?? '');
         setDiagnosticsPort(String(config?.diagnosticsPort ?? 8080));
-    }, [config?.serverId, config?.diagnosticsPort]);
+    }, [config?.discordToken, config?.openaiKey, config?.serverId, config?.diagnosticsPort]);
 
     async function save(): Promise<void> {
         setSaving(true);
         setErr(''); setMsg('');
         try {
             const body: Record<string, unknown> = {
+                discordToken: discordToken.trim(),
+                openaiKey: openaiKey.trim(),
                 serverId: serverId.trim() || null,
                 diagnosticsPort: Number(diagnosticsPort),
             };
-            if (discordToken.trim()) body['discordToken'] = discordToken.trim();
-            if (openaiKey.trim()) body['openaiKey'] = openaiKey.trim();
             await jsonPost('/api/config', body);
-            setDiscordToken('');
-            setOpenaiKey('');
             setMsg('Saved.');
             onSave();
         } catch (e) {
@@ -280,11 +280,10 @@ function BotSetup({ config, onSave }: {
             {config && <p style={{ color: '#b4bdc8', marginTop: 0 }}>Config: {config.configPath}</p>}
             {err && <p style={S.err}>{err}</p>}
             {msg && <p style={S.ok}>{msg}</p>}
-            <Field label="Discord Token" type="password" value={discordToken} onChange={setDiscordToken} placeholder="Paste to set/replace" />
-            <Field label="Server ID" value={serverId} onChange={setServerId} placeholder="Optional guild ID" />
-            <Field label="OpenAI Key" type="password" value={openaiKey} onChange={setOpenaiKey} placeholder="Paste to set/replace" />
+            <Field label="Discord Token" value={discordToken} onChange={setDiscordToken} placeholder="Discord bot token" />
+            <Field label="Server ID (required)" value={serverId} onChange={setServerId} placeholder="Required — Discord server ID" />
+            <Field label="OpenAI Key" value={openaiKey} onChange={setOpenaiKey} placeholder="OpenAI API key" />
             <Field label="Diagnostics Port" type="number" value={diagnosticsPort} onChange={setDiagnosticsPort} placeholder="8080" />
-            {config && <p style={{ color: '#b4bdc8' }}>Token: {config.hasDiscordToken ? '✅ set' : '—'} · OpenAI: {config.hasOpenaiKey ? '✅ set' : '—'}</p>}
             <button style={S.btn} onClick={() => void save()} disabled={saving}>
                 {saving ? 'Saving…' : 'Save'}
             </button>
@@ -292,7 +291,7 @@ function BotSetup({ config, onSave }: {
     );
 }
 
-function ChannelBehaviors(): JSX.Element {
+function ChannelBehaviors({ refreshKey }: { refreshKey?: number }): JSX.Element {
     const [data, setData] = useState<ChannelsData | null>(null);
     const [err, setErr] = useState('');
     const [addChannelId, setAddChannelId] = useState('');
@@ -307,7 +306,7 @@ function ChannelBehaviors(): JSX.Element {
         }
     }
 
-    useEffect(() => { void load(); }, []);
+    useEffect(() => { void load(); }, [refreshKey]);
 
     async function addMapping(): Promise<void> {
         if (!addChannelId) return;
@@ -337,7 +336,10 @@ function ChannelBehaviors(): JSX.Element {
 
     return (
         <section style={S.box}>
-            <h2 style={{ marginTop: 0 }}>Channel Behaviors</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                <h2 style={{ marginTop: 0, marginBottom: 0 }}>Channel Behaviors</h2>
+                <button style={{ ...S.btn, marginRight: 0 }} onClick={() => void load()}>Refresh Channels</button>
+            </div>
             {err && <p style={S.err}>{err}</p>}
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px' }}>
                 <thead>
@@ -366,7 +368,7 @@ function ChannelBehaviors(): JSX.Element {
                 <label style={S.label}>
                     <span style={S.labelText}>Channel</span>
                     <select style={S.select} value={addChannelId} onChange={e => setAddChannelId((e.currentTarget as HTMLSelectElement).value)}>
-                        <option value="">Select…</option>
+                        <option value="">Select channel…</option>
                         {data?.unmapped.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
                     </select>
                 </label>
@@ -490,7 +492,7 @@ function LogSection(): JSX.Element {
                     <dt style={{ color: '#b4bdc8' }}>Bot</dt><dd style={{ margin: 0 }}>{status.tag ?? '—'}</dd>
                     <dt style={{ color: '#b4bdc8' }}>Started</dt><dd style={{ margin: 0 }}>{status.startedAt ?? '—'}</dd>
                     <dt style={{ color: '#b4bdc8' }}>Server ID</dt><dd style={{ margin: 0 }}>{status.configuredServerId ?? '—'}</dd>
-                    <dt style={{ color: '#b4bdc8' }}>Guilds</dt><dd style={{ margin: 0 }}>{status.guilds.join(', ') || '—'}</dd>
+                    <dt style={{ color: '#b4bdc8' }}>Servers</dt><dd style={{ margin: 0 }}>{status.guilds.join(', ') || '—'}</dd>
                 </dl>
             )}
             <div style={{ maxHeight: '400px', overflow: 'auto', border: '1px solid #2b3340', borderRadius: '8px' }}>
@@ -521,12 +523,39 @@ function LogSection(): JSX.Element {
     );
 }
 
+function RestartSection(): JSX.Element {
+    const [msg, setMsg] = useState('');
+    const [err, setErr] = useState('');
+    const [restarting, setRestarting] = useState(false);
+
+    async function restart(): Promise<void> {
+        setRestarting(true); setErr(''); setMsg('');
+        try {
+            await jsonPost('/api/restart', {});
+            setMsg('Restart signal sent. The server will restart shortly.');
+        } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+            setRestarting(false);
+        }
+    }
+
+    return (
+        <section style={S.box}>
+            <h2 style={{ marginTop: 0 }}>Server Control</h2>
+            {err && <p style={S.err}>{err}</p>}
+            {msg && <p style={S.ok}>{msg}</p>}
+            <button style={{ ...S.btn, background: '#8a6d00' }} onClick={() => void restart()} disabled={restarting}>
+                {restarting ? 'Restarting…' : 'Restart Server'}
+            </button>
+        </section>
+    );
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App(): JSX.Element {
     const [config, setConfig] = useState<ConfigData | null>(null);
-    const configRef = useRef(config);
-    configRef.current = config;
+    const [refreshKey, setRefreshKey] = useState(0);
 
     async function loadConfig(): Promise<void> {
         const d = await apiFetch<ConfigData>('/api/config');
@@ -535,14 +564,20 @@ function App(): JSX.Element {
 
     useEffect(() => { void loadConfig(); }, []);
 
+    function handleSave(): void {
+        void loadConfig();
+        setRefreshKey(k => k + 1);
+    }
+
     return (
         <main style={{ maxWidth: '860px', margin: '0 auto', padding: '24px' }}>
             <h1 style={{ marginTop: 0 }}>🖨️ Windsor Control Panel</h1>
-            <BotSetup config={config} onSave={() => void loadConfig()} />
-            <ChannelBehaviors />
+            <BotSetup config={config} onSave={handleSave} />
+            <ChannelBehaviors refreshKey={refreshKey} />
             <PrinterSection />
             <SecuritySection onSave={() => void loadConfig()} />
             <LogSection />
+            <RestartSection />
         </main>
     );
 }

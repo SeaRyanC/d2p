@@ -102,29 +102,3 @@ export interface CommandContext {
     guildId: string;
 }
 
-// ─── Legacy compat (used by server.ts) ───────────────────────────────────────
-
-/** @deprecated Use WindsorConfig instead */
-export interface RuntimeConfig {
-    discordToken: string | null;
-    serverId: string | null;
-    diagnosticsPort: number;
-    printerName: string | null;
-}
-
-/** @deprecated Use WindsorConfig instead */
-export interface PublicRuntimeConfig {
-    hasDiscordToken: boolean;
-    serverId: string | null;
-    diagnosticsPort: number;
-    printerName: string | null;
-    configPath: string;
-}
-
-/** @deprecated Use WindsorConfig patch instead */
-export interface RuntimeConfigPatch {
-    discordToken?: string | null;
-    serverId?: string | null;
-    diagnosticsPort?: number;
-    printerName?: string | null;
-}

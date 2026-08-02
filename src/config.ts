@@ -4,11 +4,9 @@ import { join } from 'path';
 import type { WindsorConfig, ChannelMapping, TokenUsageEntry } from './types.ts';
 
 export const DEFAULT_CONFIG_FILE = 'windsor.config.json';
-const LEGACY_CONFIG_FILE = 'd2p.config.json';
 
 export function getConfigPath(): string {
     if (process.env['WINDSOR_CONFIG_PATH']) return process.env['WINDSOR_CONFIG_PATH'];
-    if (process.env['D2P_CONFIG_PATH']) return process.env['D2P_CONFIG_PATH'];
     return join(process.cwd(), DEFAULT_CONFIG_FILE);
 }
 
@@ -88,22 +86,13 @@ function parseConfig(raw: unknown): WindsorConfig {
 export async function loadConfig(): Promise<{ config: WindsorConfig; configPath: string }> {
     _configPath = getConfigPath();
 
-    // Try canonical path, then legacy path
-    const pathsToTry = [_configPath];
-    if (_configPath.endsWith(DEFAULT_CONFIG_FILE)) {
-        pathsToTry.push(join(process.cwd(), LEGACY_CONFIG_FILE));
-    }
-
-    for (const p of pathsToTry) {
-        try {
-            const raw = await readFile(p, 'utf8');
-            _config = parseConfig(JSON.parse(raw));
-            _configPath = p;
-            return { config: _config, configPath: _configPath };
-        } catch (err) {
-            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-                throw err;
-            }
+    try {
+        const raw = await readFile(_configPath, 'utf8');
+        _config = parseConfig(JSON.parse(raw));
+        return { config: _config, configPath: _configPath };
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            throw err;
         }
     }
 
@@ -175,15 +164,4 @@ export async function reconcileChannels(discordChannels: DiscordChannelInfo[]): 
     await saveCurrentConfig();
 }
 
-// ─── Legacy compat (kept for server.ts usage) ────────────────────────────────
 
-export function toPublicConfig(configPath: string) {
-    return {
-        hasDiscordToken: Boolean(_config.discordToken),
-        hasOpenaiKey: Boolean(_config.openaiKey),
-        serverId: _config.serverId ?? null,
-        diagnosticsPort: _config.diagnosticsPort,
-        channels: _config.channels,
-        configPath,
-    };
-}
