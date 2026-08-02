@@ -57,9 +57,11 @@ export async function buildEscpBuffer(job: PrintJob): Promise<Buffer> {
     if (job.iconPath) {
         try {
             const img = await Jimp.read(job.iconPath);
-            // Scale up with nearest-neighbor for crisp pixel art; fill the full paper width (~576 dots on 80mm)
-            const scale = Math.floor(576 / img.width) || 1;
-            img.resize({ w: img.width * scale, h: img.height * scale, mode: ResizeStrategy.NEAREST_NEIGHBOR });
+            const PRINT_WIDTH = 576; // ~80mm at 180dpi
+            const scale = img.width <= PRINT_WIDTH
+                ? Math.floor(PRINT_WIDTH / img.width)
+                : PRINT_WIDTH / img.width;
+            img.resize({ w: Math.round(img.width * scale), h: Math.round(img.height * scale), mode: ResizeStrategy.NEAREST_NEIGHBOR });
             const escImage = new Image(img.bitmap as { width: number; height: number; data: Buffer });
             await printer.draw(escImage);
             await printer.feed(1);
