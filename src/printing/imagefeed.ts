@@ -73,10 +73,23 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
     const fontLarge = await loadFont(FONT_32);
     const bodyFont = lineHeight === LINE_HEIGHT_LARGE ? fontLarge : fontNormal;
 
-    // First pass: measure total height
+    // Pre-load and scale the icon so we know its exact dimensions before sizing the canvas
+    let scaledSprite: Awaited<ReturnType<typeof Jimp.read>> | null = null;
+    if (job.iconPath) {
+        try {
+            const sprite = await Jimp.read(job.iconPath);
+            const scale = Math.max(1, Math.floor(TEXT_WIDTH / sprite.width));
+            sprite.resize({ w: sprite.width * scale, h: sprite.height * scale, mode: ResizeStrategy.NEAREST_NEIGHBOR });
+            scaledSprite = sprite;
+        } catch {
+            // silently skip
+        }
+    }
+
+    // Measure total height now that icon dimensions are known
     let estimatedHeight = MARGIN * 2;
     if (job.header) estimatedHeight += LINE_HEIGHT_LARGE * 2 + 12;
-    if (job.iconPath) estimatedHeight += 560 + 8; // scaled sprite (40px * 14 scale)
+    if (scaledSprite) estimatedHeight += scaledSprite.height + 8;
     for (const line of job.lines) {
         const wrapped = wrapText(line || ' ', bodyFont, TEXT_WIDTH);
         estimatedHeight += wrapped.length * lineHeight;
@@ -106,16 +119,9 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
     }
 
     // Icon / sprite image
-    if (job.iconPath) {
-        try {
-            const sprite = await Jimp.read(job.iconPath);
-            const scale = Math.floor(520 / sprite.width) || 1; // fill paper width in image feed preview
-            sprite.resize({ w: sprite.width * scale, h: sprite.height * scale, mode: ResizeStrategy.NEAREST_NEIGHBOR });
-            img.composite(sprite, MARGIN, y);
-            y += sprite.height + 8;
-        } catch {
-            // silently skip
-        }
+    if (scaledSprite) {
+        img.composite(scaledSprite, MARGIN, y);
+        y += scaledSprite.height + 8;
     }
 
     // Primary text
