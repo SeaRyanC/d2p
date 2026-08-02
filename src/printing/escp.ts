@@ -2,10 +2,8 @@ import { Printer, InMemory, Style, Align, Cut } from 'escpos-buffer';
 import { SerialPort } from 'serialport';
 import type { PrintJob } from '../types.ts';
 
-
 const COLS_NORMAL = 48;
 const COLS_DOUBLE = 24;
-
 
 function wrapText(text: string, width: number): string[] {
     const words = text.split(' ');
@@ -114,8 +112,16 @@ export async function buildEscpBuffer(job: PrintJob): Promise<Buffer> {
 export async function printJobEscp(job: PrintJob, portPath: string): Promise<void> {
     const data = await buildEscpBuffer(job);
 
+    // USB printer devices (e.g. /dev/usb/lp0) don't support serial ioctl;
+    // write directly to the device file instead.
+    if (/\/lp\d+$/.test(portPath)) {
+        const { writeFile } = await import('fs/promises');
+        await writeFile(portPath, data);
+        return;
+    }
+
     await new Promise<void>((resolve, reject) => {
-        const port = new SerialPort({ path: portPath, baudRate: 19200 });
+        const port = new SerialPort({ path: portPath, baudRate: 115200 });
 
         port.on('error', reject);
         port.on('open', () => {
