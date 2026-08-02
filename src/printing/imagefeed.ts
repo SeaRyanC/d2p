@@ -78,8 +78,12 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
     if (job.iconPath) {
         try {
             const sprite = await Jimp.read(job.iconPath);
-            const scale = Math.max(1, Math.floor(TEXT_WIDTH / sprite.width));
-            sprite.resize({ w: sprite.width * scale, h: sprite.height * scale, mode: ResizeStrategy.NEAREST_NEIGHBOR });
+            // For small pixel-art sprites: scale up by integer factor for crisp pixels.
+            // For large icons: scale down to fit within TEXT_WIDTH.
+            const scale = sprite.width <= TEXT_WIDTH
+                ? Math.floor(TEXT_WIDTH / sprite.width)
+                : TEXT_WIDTH / sprite.width;
+            sprite.resize({ w: Math.round(sprite.width * scale), h: Math.round(sprite.height * scale), mode: ResizeStrategy.NEAREST_NEIGHBOR });
             scaledSprite = sprite;
         } catch {
             // silently skip
