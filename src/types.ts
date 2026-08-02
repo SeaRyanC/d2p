@@ -1,28 +1,70 @@
-export interface CommandContext {
-    /** The name of the channel the message was sent in */
-    channelName: string;
-    /** Everything after `!commandName ` */
-    args: string;
-    /** The full original message content */
-    rawMessage: string;
-    messageId: string;
+// ─── Channel behavior types ───────────────────────────────────────────────────
+
+export type ChannelBehaviorType = 'immediate-print' | 'accumulating-list' | 'recurring-print' | 'on-demand';
+
+export interface ImmediatePrintConfig {
+    type: 'immediate-print';
+    header?: string;
+    footer?: string;
+    includeIcon: boolean;
+    includeMetadata: boolean;
+}
+
+export interface AccumulatingListConfig {
+    type: 'accumulating-list';
+    header?: string;
+    footer?: string;
+    includeChecklist: boolean;
+    includeMetadata: boolean;
+}
+
+export interface RecurringPrintConfig {
+    type: 'recurring-print';
+    header?: string;
+    footer?: string;
+    includeIcon: boolean;
+    includeMetadata: boolean;
+}
+
+export interface OnDemandConfig {
+    type: 'on-demand';
+}
+
+export type ChannelBehaviorConfig =
+    | ImmediatePrintConfig
+    | AccumulatingListConfig
+    | RecurringPrintConfig
+    | OnDemandConfig;
+
+export interface ChannelMapping {
     channelId: string;
-    guildId: string;
+    channelName: string;
+    config: ChannelBehaviorConfig;
 }
 
-export interface BotCommand {
-    /** Command name (the word immediately after `!`) */
-    name: string;
-    /**
-     * Channel names this command is active in.
-     * Empty array means the command is active in all channels.
-     */
-    channels: string[];
-    description: string;
-    execute(context: CommandContext): Promise<void>;
+// ─── Token usage ──────────────────────────────────────────────────────────────
+
+export interface TokenUsageEntry {
+    timestamp: string; // ISO string
+    tokens: number;
 }
 
-export type DiagnosticEventType = 'startup' | 'command' | 'success' | 'error' | 'info';
+// ─── Main config ─────────────────────────────────────────────────────────────
+
+export interface WindsorConfig {
+    discordToken?: string;
+    serverId?: string;
+    openaiKey?: string;
+    diagnosticsPort: number;
+    passwordHash?: string;
+    channels: ChannelMapping[];
+    iconCacheDir?: string;
+    tokenUsage: TokenUsageEntry[];
+}
+
+// ─── Diagnostics ─────────────────────────────────────────────────────────────
+
+export type DiagnosticEventType = 'startup' | 'command' | 'success' | 'error' | 'info' | 'print';
 
 export interface DiagnosticEvent {
     timestamp: string; // ISO string
@@ -38,6 +80,31 @@ export interface BotStatus {
     configuredServerId: string | null;
 }
 
+// ─── Print job ────────────────────────────────────────────────────────────────
+
+export interface PrintJob {
+    header?: string;
+    lines: string[];
+    iconPath?: string;
+    urls: string[];
+    footer?: string;
+    metadataLines?: string[];
+}
+
+// ─── On-demand command context ────────────────────────────────────────────────
+
+export interface CommandContext {
+    channelName: string;
+    args: string;
+    rawMessage: string;
+    messageId: string;
+    channelId: string;
+    guildId: string;
+}
+
+// ─── Legacy compat (used by server.ts) ───────────────────────────────────────
+
+/** @deprecated Use WindsorConfig instead */
 export interface RuntimeConfig {
     discordToken: string | null;
     serverId: string | null;
@@ -45,6 +112,7 @@ export interface RuntimeConfig {
     printerName: string | null;
 }
 
+/** @deprecated Use WindsorConfig instead */
 export interface PublicRuntimeConfig {
     hasDiscordToken: boolean;
     serverId: string | null;
@@ -53,6 +121,7 @@ export interface PublicRuntimeConfig {
     configPath: string;
 }
 
+/** @deprecated Use WindsorConfig patch instead */
 export interface RuntimeConfigPatch {
     discordToken?: string | null;
     serverId?: string | null;

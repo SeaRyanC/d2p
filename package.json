@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "node src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --experimental-strip-types src/tests/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -28,6 +28,8 @@
   "dependencies": {
     "discord.js": "^14.27.0",
     "esbuild": "^0.28.1",
-    "preact": "^10.29.7"
+    "openai": "^7.3.0",
+    "preact": "^10.29.7",
+    "zod": "^4.4.3"
   }
 }

@@ -2,12 +2,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { build } from 'esbuild';
 import { stat } from 'fs/promises';
 import { join } from 'path';
-import type {
-    DiagnosticEvent,
-    BotStatus,
-    PublicRuntimeConfig,
-    RuntimeConfigPatch,
-} from './types.ts';
+import {
+    getCurrentConfig,
+    updateConfig,
+    checkPassword,
+    hashPassword,
+    getConfigFilePath,
+    toPublicConfig,
+} from './config.ts';
+import { getConnectedPrinter, printTestPage } from './printer.ts';
+import type { DiagnosticEvent, BotStatus } from './types.ts';
 
 const MAX_EVENTS = 200;
 const events: DiagnosticEvent[] = [];
@@ -27,25 +31,65 @@ export function logEvent(type: DiagnosticEvent['type'], message: string): void {
     console.log(`[${event.timestamp}] [${type.toUpperCase()}] ${message}`);
 }
 
-function renderHtmlShell(): string {
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>d2p control panel</title>
-  <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #0f1115; color: #f5f7fa; }
-    a { color: #8ab4ff; }
-  </style>
-</head>
-<body>
-  <div id="app"></div>
-  <script type="module" src="/app.js"></script>
-</body>
-</html>`;
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+function checkAuth(req: IncomingMessage): boolean {
+    const config = getCurrentConfig();
+    if (!config.passwordHash) return true;
+
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Basic ')) return false;
+
+    const base64 = authHeader.slice(6);
+    const decoded = Buffer.from(base64, 'base64').toString('utf8');
+    const colonIdx = decoded.indexOf(':');
+    const password = colonIdx === -1 ? decoded : decoded.slice(colonIdx + 1);
+
+    return checkPassword(password);
 }
+
+function requireAuth(req: IncomingMessage, res: ServerResponse): boolean {
+    if (!checkAuth(req)) {
+        res.writeHead(401, {
+            'WWW-Authenticate': 'Basic realm="Windsor"',
+            'Content-Type': 'application/json',
+        });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return false;
+    }
+    return true;
+}
+
+// ─── HTTP helpers ─────────────────────────────────────────────────────────────
+
+function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
+    const body = JSON.stringify(payload, null, 2);
+    res.writeHead(statusCode, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(body),
+    });
+    res.end(body);
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of req) {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Buffer);
+        total += buf.byteLength;
+        if (total > 1_000_000) throw new Error('Request body too large');
+        chunks.push(buf);
+    }
+    if (chunks.length === 0) return {};
+    const raw = Buffer.concat(chunks).toString('utf8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('JSON body must be an object');
+    }
+    return parsed as Record<string, unknown>;
+}
+
+// ─── Web app bundle ───────────────────────────────────────────────────────────
 
 let appBundleCache: { script: string; mtimeMs: number } | null = null;
 
@@ -69,136 +113,174 @@ async function loadAppScript(): Promise<string> {
     });
 
     const firstFile = result.outputFiles[0];
-    if (!firstFile) {
-        throw new Error('Failed to generate app bundle');
-    }
-
-    appBundleCache = {
-        script: firstFile.text,
-        mtimeMs: sourceStat.mtimeMs,
-    };
+    if (!firstFile) throw new Error('Failed to generate app bundle');
+    appBundleCache = { script: firstFile.text, mtimeMs: sourceStat.mtimeMs };
     return firstFile.text;
 }
 
-function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
-    const body = JSON.stringify(payload, null, 2);
-    res.writeHead(statusCode, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Content-Length': Buffer.byteLength(body),
-    });
-    res.end(body);
+function renderHtmlShell(): string {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Windsor Control Panel</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #0f1115; color: #f5f7fa; }
+    a { color: #8ab4ff; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>`;
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-    const chunks: Buffer[] = [];
-    let total = 0;
+// ─── HTTP server ──────────────────────────────────────────────────────────────
 
-    for await (const chunk of req) {
-        const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        total += bufferChunk.byteLength;
-        if (total > 1_000_000) {
-            throw new Error('Request body is too large');
-        }
-        chunks.push(bufferChunk);
-    }
+/** Registered Discord channels (set by bot on startup) */
+let discordChannels: Array<{ id: string; name: string }> = [];
 
-    if (chunks.length === 0) return {};
-    const raw = Buffer.concat(chunks).toString('utf8');
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        throw new Error('JSON body must be an object');
-    }
-
-    return parsed as Record<string, unknown>;
+export function setDiscordChannels(channels: Array<{ id: string; name: string }>): void {
+    discordChannels = channels;
 }
 
-export function startDiagnosticsServer(
-    port: number,
-    getConfig: () => PublicRuntimeConfig,
-    updateConfig: (patch: RuntimeConfigPatch) => Promise<PublicRuntimeConfig>,
-): void {
+export function startDiagnosticsServer(port: number): void {
     const server = createServer(async (req, res) => {
         try {
             const method = req.method ?? 'GET';
-            const url = req.url ?? '/';
+            const rawUrl = req.url ?? '/';
+            const urlPath = rawUrl.split('?')[0] ?? '/';
 
-            if (method === 'GET' && url === '/api/events') {
-                sendJson(res, 200, { status, events: [...events].reverse() });
-                return;
-            }
-
-            if (method === 'GET' && url === '/api/status') {
-                sendJson(res, 200, status);
-                return;
-            }
-
-            if (method === 'GET' && url === '/api/config') {
-                sendJson(res, 200, getConfig());
-                return;
-            }
-
-            if ((method === 'POST' || method === 'PUT') && url === '/api/config') {
-                const body = await readJsonBody(req);
-                const patch: RuntimeConfigPatch = {};
-
-                if (Object.hasOwn(body, 'discordToken')) {
-                    const tokenValue = body['discordToken'];
-                    if (typeof tokenValue === 'string' || tokenValue === null) {
-                        patch.discordToken = tokenValue;
-                    } else {
-                        throw new Error('discordToken must be a string or null');
-                    }
-                }
-
-                if (Object.hasOwn(body, 'serverId')) {
-                    const serverIdValue = body['serverId'];
-                    if (typeof serverIdValue === 'string' || serverIdValue === null) {
-                        patch.serverId = serverIdValue;
-                    } else {
-                        throw new Error('serverId must be a string or null');
-                    }
-                }
-
-                if (Object.hasOwn(body, 'diagnosticsPort')) {
-                    const diagnosticsPortValue = body['diagnosticsPort'];
-                    if (typeof diagnosticsPortValue === 'number') {
-                        patch.diagnosticsPort = diagnosticsPortValue;
-                    } else {
-                        throw new Error('diagnosticsPort must be an integer');
-                    }
-                }
-
-                if (Object.hasOwn(body, 'printerName')) {
-                    const printerNameValue = body['printerName'];
-                    if (typeof printerNameValue === 'string' || printerNameValue === null) {
-                        patch.printerName = printerNameValue;
-                    } else {
-                        throw new Error('printerName must be a string or null');
-                    }
-                }
-
-                const config = await updateConfig(patch);
-                sendJson(res, 200, config);
-                return;
-            }
-
-            if (method === 'GET' && url === '/app.js') {
+            // Static assets (no auth required)
+            if (method === 'GET' && urlPath === '/app.js') {
                 const script = await loadAppScript();
-                res.writeHead(200, {
-                    'Content-Type': 'application/javascript; charset=utf-8',
-                    'Content-Length': Buffer.byteLength(script),
-                });
+                res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
                 res.end(script);
                 return;
             }
 
-            if (method === 'GET' && url === '/') {
+            if (method === 'GET' && urlPath === '/') {
                 const html = renderHtmlShell();
-                res.writeHead(200, {
-                    'Content-Type': 'text/html; charset=utf-8',
-                    'Content-Length': Buffer.byteLength(html),
-                });
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
                 res.end(html);
+                return;
+            }
+
+            // All API routes require auth
+            if (!requireAuth(req, res)) return;
+
+            // ── Events / status ──────────────────────────────────────────────
+            if (method === 'GET' && urlPath === '/api/events') {
+                sendJson(res, 200, { status, events: [...events].reverse() });
+                return;
+            }
+
+            if (method === 'GET' && urlPath === '/api/status') {
+                sendJson(res, 200, status);
+                return;
+            }
+
+            // ── Config ───────────────────────────────────────────────────────
+            if (method === 'GET' && urlPath === '/api/config') {
+                sendJson(res, 200, toPublicConfig(getConfigFilePath()));
+                return;
+            }
+
+            if ((method === 'POST' || method === 'PUT') && urlPath === '/api/config') {
+                const body = await readJsonBody(req);
+                const patch: Record<string, unknown> = {};
+
+                if (Object.hasOwn(body, 'discordToken') && typeof body['discordToken'] === 'string') {
+                    patch['discordToken'] = body['discordToken'].trim() || undefined;
+                }
+                if (Object.hasOwn(body, 'serverId')) {
+                    const v = body['serverId'];
+                    patch['serverId'] = typeof v === 'string' && v.trim() ? v.trim() : undefined;
+                }
+                if (Object.hasOwn(body, 'openaiKey') && typeof body['openaiKey'] === 'string') {
+                    patch['openaiKey'] = body['openaiKey'].trim() || undefined;
+                }
+                if (Object.hasOwn(body, 'diagnosticsPort') && typeof body['diagnosticsPort'] === 'number') {
+                    patch['diagnosticsPort'] = body['diagnosticsPort'];
+                }
+                if (Object.hasOwn(body, 'password') && typeof body['password'] === 'string') {
+                    const pw = body['password'].trim();
+                    if (pw) {
+                        patch['passwordHash'] = hashPassword(pw);
+                    } else {
+                        patch['passwordHash'] = undefined;
+                    }
+                }
+
+                await updateConfig(patch as Parameters<typeof updateConfig>[0]);
+                sendJson(res, 200, toPublicConfig(getConfigFilePath()));
+                return;
+            }
+
+            // ── Channels ──────────────────────────────────────────────────────
+            if (method === 'GET' && urlPath === '/api/channels') {
+                const config = getCurrentConfig();
+                sendJson(res, 200, {
+                    channels: config.channels,
+                    discordChannels,
+                    unmapped: discordChannels.filter(dc =>
+                        !config.channels.find(m => m.channelId === dc.id)
+                    ),
+                });
+                return;
+            }
+
+            if (method === 'POST' && urlPath === '/api/channels') {
+                const body = await readJsonBody(req);
+                const config = getCurrentConfig();
+                const newMapping = body as unknown as import('./types.ts').ChannelMapping;
+                const channels = [...config.channels, newMapping];
+                await updateConfig({ channels });
+                sendJson(res, 200, { channels: getCurrentConfig().channels });
+                return;
+            }
+
+            const channelDeleteMatch = /^\/api\/channels\/([^/]+)$/.exec(urlPath);
+            if (channelDeleteMatch) {
+                const channelId = channelDeleteMatch[1]!;
+                if (method === 'DELETE') {
+                    const config = getCurrentConfig();
+                    const channels = config.channels.filter(m => m.channelId !== channelId);
+                    await updateConfig({ channels });
+                    sendJson(res, 200, { channels: getCurrentConfig().channels });
+                    return;
+                }
+                if (method === 'PUT') {
+                    const body = await readJsonBody(req);
+                    const config = getCurrentConfig();
+                    const channels = config.channels.map(m =>
+                        m.channelId === channelId ? { ...m, ...body } : m
+                    ) as typeof config.channels;
+                    await updateConfig({ channels });
+                    sendJson(res, 200, { channels: getCurrentConfig().channels });
+                    return;
+                }
+            }
+
+            // ── Printer ───────────────────────────────────────────────────────
+            if (method === 'GET' && urlPath === '/api/printer') {
+                const printerName = await getConnectedPrinter();
+                sendJson(res, 200, { printer: printerName });
+                return;
+            }
+
+            if (method === 'POST' && urlPath === '/api/printer/test') {
+                const printerName = await getConnectedPrinter();
+                if (!printerName) {
+                    sendJson(res, 503, { error: 'No printer connected' });
+                    return;
+                }
+                await printTestPage(printerName);
+                logEvent('print', 'Test page printed');
+                sendJson(res, 200, { ok: true });
                 return;
             }
 
@@ -206,7 +288,7 @@ export function startDiagnosticsServer(
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             sendJson(res, 400, { error: message });
-            logEvent('error', `Diagnostics API error: ${message}`);
+            logEvent('error', `API error: ${message}`);
         }
     });
 
