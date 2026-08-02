@@ -3,27 +3,22 @@ import {
     GatewayIntentBits,
     type Guild,
     type Message,
-    type TextChannel,
     type MessageReaction,
+    type TextChannel,
 } from 'discord.js';
-import { logEvent, status } from './server.ts';
+import { formatScheduleDate, generateIcon, getNextOccurrence, parseRecurringSchedule } from './ai.ts';
+import { Commands } from './commands/index.ts';
 import { getCurrentConfig, reconcileChannels } from './config.ts';
-import { printJob } from './printer.ts';
-import { formatTimestamp } from './printer.ts';
-import { parseRecurringSchedule, generateIcon, formatScheduleDate, getNextOccurrence } from './ai.ts';
-import { printSudoku } from './commands/sudoku.ts';
-import { printWordsearch } from './commands/wordsearch.ts';
+import { formatTimestamp, printJob } from './printer.ts';
+import { logEvent, status } from './server.ts';
 import type {
+    AccumulatingListConfig,
     ChannelBehaviorConfig,
     ImmediatePrintConfig,
-    AccumulatingListConfig,
-    RecurringPrintConfig,
     PrintJob,
+    RecurringPrintConfig,
 } from './types.ts';
-
-const REACT_OK = '✅';
-const REACT_FAIL = '⏸️';
-const REACT_PARSE_FAIL = '⁉️';
+import { Reaction } from './reactions.ts';
 
 const MAX_MESSAGE_CHARS = 800;
 const MAX_URLS = 5;
@@ -68,7 +63,7 @@ export function replaceUrlsInText(text: string, urls: string[]): string {
 
 // ─── Idempotency helpers ──────────────────────────────────────────────────────
 
-async function hasReaction(message: Message, emoji: string): Promise<boolean> {
+async function hasReaction(message: Message, emoji: Reaction): Promise<boolean> {
     try {
         await message.fetch();
     } catch {
@@ -78,7 +73,21 @@ async function hasReaction(message: Message, emoji: string): Promise<boolean> {
     return Boolean(reaction?.me);
 }
 
-async function reactSafe(message: Message, emoji: string): Promise<void> {
+async function hasAnyReaction(message: Message) {
+    try {
+        await message.fetch();
+    } catch {
+        // ignore
+    }
+    for (const v of Object.values(Reaction) as Reaction[]) {
+        if (message.reactions.cache.get(v)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+async function reactSafe(message: Message, emoji: Reaction): Promise<void> {
     try {
         await message.react(emoji);
     } catch {
@@ -205,8 +214,7 @@ export class WindsorBot {
                     if (msg.author.bot) continue;
                     if (msg.reference) continue; // skip replies
                     if (msg.author.id === botId) continue;
-                    if (await hasReaction(msg, REACT_OK)) continue;
-                    if (await hasReaction(msg, REACT_FAIL)) continue;
+                    if (await hasAnyReaction(msg)) continue;
                     await this.handleImmediatePrint(msg, config);
                 }
                 break;
@@ -218,7 +226,7 @@ export class WindsorBot {
                     if (msg.reference) continue;
                     if (msg.author.id === botId) continue;
                     if (!isPrintTrigger(msg.content)) continue;
-                    if (await hasReaction(msg, REACT_OK)) continue;
+                    if (await hasAnyReaction(msg)) continue;
                     // Also retry ⏸️ reactions
                     await this.handleAccumulatingPrint(msg, config, messages);
                 }
@@ -233,8 +241,7 @@ export class WindsorBot {
                     if (msg.author.bot) continue;
                     if (msg.reference) continue;
                     if (msg.author.id === botId) continue;
-                    if (await hasReaction(msg, REACT_OK)) continue;
-                    if (await hasReaction(msg, REACT_FAIL)) continue;
+                    if (await hasAnyReaction(msg)) continue;
                     await this.handleOnDemand(msg);
                 }
                 break;
@@ -271,7 +278,7 @@ export class WindsorBot {
                 continue; // All done
             }
 
-            if (latestStatus && latestStatus.content.startsWith('Printed at') && !await hasReaction(latestStatus, REACT_OK)) {
+            if (latestStatus && latestStatus.content.startsWith('Printed at') && !await hasReaction(latestStatus, Reaction.ok)) {
                 // Printed but no OK reaction - need to fetch next occurrence
                 await this.advanceRecurring(scheduleReply, latestStatus, config);
                 continue;
@@ -335,7 +342,7 @@ export class WindsorBot {
         const strippedText = stripUrls(rawContent);
 
         if (strippedText.length > MAX_MESSAGE_CHARS) {
-            await reactSafe(message, REACT_PARSE_FAIL);
+            await reactSafe(message, Reaction.fail);
             return;
         }
 
@@ -360,10 +367,10 @@ export class WindsorBot {
 
         try {
             await printJob(job);
-            await reactSafe(message, REACT_OK);
+            await reactSafe(message, Reaction.ok);
             logEvent('print', `Printed immediate message from ${message.author.username}`);
         } catch (err) {
-            await reactSafe(message, REACT_FAIL);
+            await reactSafe(message, Reaction.fail);
             await replySafe(message, `⏸️ Print failed: ${err instanceof Error ? err.message : String(err)}`);
             logEvent('error', `Print failed: ${err}`);
         }
@@ -385,7 +392,7 @@ export class WindsorBot {
             !m.author.bot &&
             !m.reference &&
             isPrintTrigger(m.content) &&
-            m.reactions.cache.get(REACT_OK)?.me
+            m.reactions.cache.get(Reaction.ok)?.me
         );
 
         const startIdx = prevPrintIdx === -1 ? 0 : triggerIdx - prevPrintIdx;
@@ -404,18 +411,18 @@ export class WindsorBot {
         if (items.length === 0) {
             // Re-use items from the previous print
             if (prevPrintIdx === -1) {
-                await reactSafe(triggerMessage, REACT_OK);
+                await reactSafe(triggerMessage, Reaction.ok);
                 return;
             }
             const prevTriggerMsg = prior[prevPrintIdx];
             if (!prevTriggerMsg) {
-                await reactSafe(triggerMessage, REACT_OK);
+                await reactSafe(triggerMessage, Reaction.ok);
                 return;
             }
             const prevTriggerIdx = allMessages.findIndex(m => m.id === prevTriggerMsg.id);
             const beforePrev = allMessages.slice(0, prevTriggerIdx);
             const prevPrevIdx = beforePrev.reverse().findIndex(m =>
-                !m.author.bot && !m.reference && isPrintTrigger(m.content) && m.reactions.cache.get(REACT_OK)?.me
+                !m.author.bot && !m.reference && isPrintTrigger(m.content) && m.reactions.cache.get(Reaction.ok)?.me
             );
             const prevStartIdx = prevPrevIdx === -1 ? 0 : prevTriggerIdx - prevPrevIdx;
             items = allMessages.slice(prevStartIdx, prevTriggerIdx).filter(m =>
@@ -424,7 +431,7 @@ export class WindsorBot {
         }
 
         if (items.length === 0) {
-            await reactSafe(triggerMessage, REACT_OK);
+            await reactSafe(triggerMessage, Reaction.ok);
             return;
         }
 
@@ -443,10 +450,10 @@ export class WindsorBot {
 
         try {
             await printJob(job);
-            await reactSafe(triggerMessage, REACT_OK);
+            await reactSafe(triggerMessage, Reaction.ok);
             logEvent('print', `Printed accumulating list (${lines.length} items)`);
         } catch (err) {
-            await reactSafe(triggerMessage, REACT_FAIL);
+            await reactSafe(triggerMessage, Reaction.fail);
             await replySafe(triggerMessage, `⏸️ Print failed: ${err instanceof Error ? err.message : String(err)}`);
             logEvent('error', `Accumulating print failed: ${err}`);
         }
@@ -460,20 +467,20 @@ export class WindsorBot {
         try {
             const parsed = await parseRecurringSchedule(rawContent, new Date());
             if (!parsed) {
-                await reactSafe(message, REACT_PARSE_FAIL);
+                await reactSafe(message, Reaction.what);
                 await replySafe(message, '⁉️ Could not parse a schedule from your message. Please try again with a clearer schedule.');
                 return;
             }
 
             const nextStr = formatScheduleDate(parsed.nextOccurrence);
-            await reactSafe(message, REACT_OK);
+            await reactSafe(message, Reaction.ok);
             const reply = await replySafe(message, `Got it. I will print ⟪${parsed.message}⟫ at ${nextStr}`);
 
             if (reply) {
                 scheduleRecurringTask(reply, parsed.nextOccurrence, config, this);
             }
         } catch (err) {
-            await reactSafe(message, REACT_PARSE_FAIL);
+            await reactSafe(message, Reaction.fail);
             await replySafe(message, `⁉️ Failed to parse schedule: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
@@ -534,7 +541,7 @@ export class WindsorBot {
         }
 
         if (statusReply) {
-            await reactSafe(statusReply, REACT_OK);
+            await reactSafe(statusReply, Reaction.ok);
         }
 
         if (nextOccurrence && statusReply) {
@@ -559,7 +566,7 @@ export class WindsorBot {
 
         const nextStr = formatScheduleDate(nextOccurrence);
         await replySafe(latestStatusReply, `The next print will be at ${nextStr}.`);
-        await reactSafe(latestStatusReply, REACT_OK);
+        await reactSafe(latestStatusReply, Reaction.ok);
         scheduleRecurringTask(scheduleReply, nextOccurrence, config, this);
     }
 
@@ -574,29 +581,26 @@ export class WindsorBot {
         const commandName = (spaceIdx === -1 ? afterPrefix : afterPrefix.slice(0, spaceIdx)).toLowerCase();
         const args = spaceIdx === -1 ? '' : afterPrefix.slice(spaceIdx + 1).trim();
 
-        switch (commandName) {
-            case 'sudoku': {
-                try {
-                    await printSudoku(args.toLowerCase() as 'kid' | 'easy' | 'medium' | 'hard' | '');
-                    await reactSafe(message, REACT_OK);
-                    logEvent('print', `Printed sudoku (${args || 'easy'})`);
-                } catch (err) {
-                    await reactSafe(message, REACT_FAIL);
-                    await replySafe(message, `⏸️ Print failed: ${err instanceof Error ? err.message : String(err)}`);
+        let foundCommand = false;
+        for (const cmd of Commands) {
+            if (cmd.aliases.some(a => commandName.localeCompare(a, undefined, { sensitivity: "base" }) == 0)) {
+                foundCommand = true;
+                const result = await cmd.invoke(args);
+                if (result.kind === 'pass') {
+                    await reactSafe(message, "✅");
+                    if (result.reply) {
+                        await replySafe(message, result.reply);
+                    }
+                } else {
+                    void (result.kind satisfies 'fail');
+                    await reactSafe(message, "❌");
+                    await replySafe(message, result.reason);
                 }
                 break;
             }
-            case 'wordsearch': {
-                try {
-                    await printWordsearch();
-                    await reactSafe(message, REACT_OK);
-                    logEvent('print', 'Printed word search');
-                } catch (err) {
-                    await reactSafe(message, REACT_FAIL);
-                    await replySafe(message, `⏸️ Print failed: ${err instanceof Error ? err.message : String(err)}`);
-                }
-                break;
-            }
+        }
+        if (!foundCommand) {
+            await reactSafe(message, "❓");
         }
     }
 }

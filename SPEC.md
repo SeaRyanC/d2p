@@ -161,3 +161,20 @@ Do not include keepalive pings or other routine "non-events".
 ## Testing
 
 Write tasteful unit tests at module boundaries. Test for behavorial acceptance, not hardcoded results, and don't test things that TypeScript is already covering for us. Tests must be typechecked. Don't test things that are too much of a pain in the ass.
+
+## Revision notes: alpha
+
+Apply these revisions to the spec or readme IF APPROPRIATE
+
+ * It should be more apparent in the server config whether a Discord token has been set yet. Same for OpenAI. Don't actually hide these, just always show them
+ * Use "server" in all user-facing config, never "guild"
+ * Server ID is required
+ * Setting the discord token and server ID should reload the channel list in the server UI
+ * Fix this: "(node:49701) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead."
+ * Add a "refresh channels" button to the server UI, next to the channel list
+ * Remove all "back compat" code, you don't need to be backward compatible with anything, this is an alpha project
+ * Command invocation should automatically trigger a log event without extra per-code command
+ * Don't use `class` in this project, use a function/revealing-module pattern instead
+ * Server config UI should have a "Restart Server" button
+ * Don't show voice channels or forum channels in the channel listing
+ * 

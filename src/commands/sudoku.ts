@@ -1,6 +1,7 @@
 import { printJob } from '../printer.ts';
 import type { PrintJob } from '../types.ts';
-import { getConnectedPrinter } from '../printer.ts';
+import type { Command, CommandResult } from './index.ts';
+import { tryExecCommandFunction } from './util.ts';
 
 type Difficulty = 'kid' | 'easy' | 'medium' | 'hard' | '';
 
@@ -67,7 +68,10 @@ function renderSudokuGrid(grid: Grid): string[] {
     return lines;
 }
 
-export async function printSudoku(difficulty: Difficulty): Promise<void> {
+async function printSudokuWorker(args: string): Promise<CommandResult> {
+    // !TODO: Implement good command parsing
+    const difficulty = args as Difficulty;
+
     const diff = difficulty || 'easy';
     const grid = generateSudoku(diff as Difficulty);
     const gridLines = renderSudokuGrid(grid);
@@ -79,7 +83,13 @@ export async function printSudoku(difficulty: Difficulty): Promise<void> {
     };
 
     await printJob(job);
+
+    return {
+        kind: "pass"
+    };
 }
 
-// suppress warning
-void getConnectedPrinter;
+export const printSudoku: Command = {
+    aliases: ["sudoku"],
+    invoke: tryExecCommandFunction(printSudokuWorker)
+};

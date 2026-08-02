@@ -1,3 +1,4 @@
 dist/
 node_modules/
 d2p.config.json
+windsor.config.json
