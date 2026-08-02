@@ -39,7 +39,7 @@ function chooseFontForLines(totalLines: number): { fontSize: FontSize; cols: num
 
 export async function buildEscpBuffer(job: PrintJob): Promise<Buffer> {
     const conn = new InMemory();
-    const printer = await Printer.CONNECT('POS-80', conn);
+    const printer = await Printer.CONNECT('TM-T20', conn);
 
     const { fontSize, cols } = chooseFontForLines(job.lines.length <= 2 ? 2 : job.lines.length);
 
