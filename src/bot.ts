@@ -10,7 +10,8 @@ import {
 import { formatScheduleDate, generateIcon, getNextOccurrence, parseRecurringSchedule } from './ai.ts';
 import { Commands } from './commands/index.ts';
 import { getCurrentConfig, reconcileChannels } from './config.ts';
-import { formatTimestamp, printJob } from './printer.ts';
+import { formatTimestamp } from './printer.ts';
+import { printJob } from './printing/index.ts';
 import { logEvent, status } from './server.ts';
 import type {
     AccumulatingListConfig,
@@ -24,7 +25,6 @@ import { Reaction } from './reactions.ts';
 const MAX_MESSAGE_CHARS = 800;
 const MAX_URLS = 5;
 
-// ─── URL extraction ───────────────────────────────────────────────────────────
 
 const URL_REGEX = /https:\/\/[^\s<>"']+/g;
 const TRAILING_PUNCT = /[.,;:!?)\]}>'"]+$/;
@@ -62,7 +62,6 @@ export function replaceUrlsInText(text: string, urls: string[]): string {
     return result;
 }
 
-// ─── Idempotency helpers ──────────────────────────────────────────────────────
 
 async function hasReaction(message: Message, emoji: Reaction): Promise<boolean> {
     try {
@@ -104,13 +103,11 @@ async function replySafe(message: Message, content: string): Promise<Message | n
     }
 }
 
-// ─── Normalize "print" trigger ────────────────────────────────────────────────
 
 function isPrintTrigger(content: string): boolean {
     return content.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'print';
 }
 
-// ─── Bot interface ────────────────────────────────────────────────────────────
 
 export interface WindsorBotHandle {
     start(token: string): Promise<void>;
@@ -124,7 +121,6 @@ export interface WindsorBotHandle {
     handleOnDemand(message: Message): Promise<void>;
 }
 
-// ─── Bot factory ──────────────────────────────────────────────────────────────
 
 export function createWindsorBot(): WindsorBotHandle {
     const client = new Client({
@@ -355,8 +351,6 @@ export function createWindsorBot(): WindsorBotHandle {
         }
     }
 
-    // ─── Immediate Print ──────────────────────────────────────────────────────
-
     async function handleImmediatePrint(message: Message, config: ImmediatePrintConfig): Promise<void> {
         const rawContent = message.content;
         const urls = extractUrls(rawContent);
@@ -397,8 +391,6 @@ export function createWindsorBot(): WindsorBotHandle {
             logEvent('error', `Print failed: ${err}`);
         }
     }
-
-    // ─── Accumulating List ────────────────────────────────────────────────────
 
     async function handleAccumulatingPrint(
         triggerMessage: Message,
@@ -474,8 +466,6 @@ export function createWindsorBot(): WindsorBotHandle {
             logEvent('error', `Accumulating print failed: ${err}`);
         }
     }
-
-    // ─── Recurring Print ──────────────────────────────────────────────────────
 
     async function handleRecurringSetup(message: Message, config: RecurringPrintConfig): Promise<void> {
         const rawContent = message.content;
@@ -579,8 +569,6 @@ export function createWindsorBot(): WindsorBotHandle {
         scheduleRecurringTask(scheduleReply, nextOccurrence, config, bot);
     }
 
-    // ─── On-Demand ────────────────────────────────────────────────────────────
-
     async function handleOnDemand(message: Message): Promise<void> {
         const content = message.content.trim();
         if (!content.startsWith('!') && !content.startsWith('/')) return;
@@ -595,7 +583,8 @@ export function createWindsorBot(): WindsorBotHandle {
             if (cmd.aliases.some(a => commandName.localeCompare(a, undefined, { sensitivity: "base" }) == 0)) {
                 foundCommand = true;
                 logEvent('command', `Command '${commandName}' invoked by ${message.author.username}`);
-                const result = await cmd.invoke(args);
+                const ctx: import('./commands/index.ts').CommandRunContext = { printJob };
+                const result = await cmd.invoke(args, ctx);
                 if (result.kind === 'pass') {
                     await reactSafe(message, "✅");
                     if (result.reply) {
@@ -617,7 +606,6 @@ export function createWindsorBot(): WindsorBotHandle {
     return bot;
 }
 
-// ─── Recurring task scheduler ─────────────────────────────────────────────────
 
 interface ScheduledTask {
     scheduleReply: Message;

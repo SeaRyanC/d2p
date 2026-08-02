@@ -1,4 +1,3 @@
-// ─── Channel behavior types ───────────────────────────────────────────────────
 
 export type ChannelBehaviorType = 'immediate-print' | 'accumulating-list' | 'recurring-print' | 'on-demand';
 
@@ -42,14 +41,33 @@ export interface ChannelMapping {
     config: ChannelBehaviorConfig;
 }
 
-// ─── Token usage ──────────────────────────────────────────────────────────────
 
 export interface TokenUsageEntry {
     timestamp: string; // ISO string
     tokens: number;
 }
 
-// ─── Main config ─────────────────────────────────────────────────────────────
+
+export type PrintMode = 'escp' | 'cups' | 'imagefeed';
+
+export interface EscpPrintConfig {
+    mode: 'escp';
+    serialPort: string; // e.g. /dev/ttyUSB0 or COM3
+}
+
+export interface CupsPrintConfig {
+    mode: 'cups';
+    printerName: string;
+    paperSize: string;  // e.g. "Letter", "A4"
+    paperName: string;  // human label shown on printout
+}
+
+export interface ImageFeedConfig {
+    mode: 'imagefeed';
+}
+
+export type PrintConfig = EscpPrintConfig | CupsPrintConfig | ImageFeedConfig;
+
 
 export interface WindsorConfig {
     discordToken?: string;
@@ -60,9 +78,9 @@ export interface WindsorConfig {
     channels: ChannelMapping[];
     iconCacheDir?: string;
     tokenUsage: TokenUsageEntry[];
+    printConfig?: PrintConfig;
 }
 
-// ─── Diagnostics ─────────────────────────────────────────────────────────────
 
 export type DiagnosticEventType = 'startup' | 'command' | 'success' | 'error' | 'info' | 'print';
 
@@ -80,7 +98,6 @@ export interface BotStatus {
     configuredServerId: string | null;
 }
 
-// ─── Print job ────────────────────────────────────────────────────────────────
 
 export interface PrintJob {
     header?: string;
@@ -91,7 +108,6 @@ export interface PrintJob {
     metadataLines?: string[];
 }
 
-// ─── On-demand command context ────────────────────────────────────────────────
 
 export interface CommandContext {
     channelName: string;

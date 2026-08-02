@@ -1,6 +1,5 @@
-import { printJob } from '../printer.ts';
 import type { PrintJob } from '../types.ts';
-import type { Command, CommandResult } from './index.ts';
+import type { Command, CommandResult, CommandRunContext } from './index.ts';
 import { tryExecCommandFunction } from './util.ts';
 
 type Difficulty = 'kid' | 'easy' | 'medium' | 'hard' | '';
@@ -68,7 +67,7 @@ function renderSudokuGrid(grid: Grid): string[] {
     return lines;
 }
 
-async function printSudokuWorker(args: string): Promise<CommandResult> {
+async function printSudokuWorker(args: string, ctx: CommandRunContext): Promise<CommandResult> {
     // !TODO: Implement good command parsing
     const difficulty = args as Difficulty;
 
@@ -82,7 +81,7 @@ async function printSudokuWorker(args: string): Promise<CommandResult> {
         lines: gridLines,
     };
 
-    await printJob(job);
+    await ctx.printJob(job);
 
     return {
         kind: "pass"

@@ -10,7 +10,6 @@ export function getConfigPath(): string {
     return join(process.cwd(), DEFAULT_CONFIG_FILE);
 }
 
-// ─── In-memory state ──────────────────────────────────────────────────────────
 
 let _config: WindsorConfig = {
     diagnosticsPort: 8080,
@@ -27,7 +26,6 @@ export function getConfigFilePath(): string {
     return _configPath;
 }
 
-// ─── Persistence ──────────────────────────────────────────────────────────────
 
 function defaultConfig(): WindsorConfig {
     const envPort = Number.parseInt(process.env['DIAGNOSTICS_PORT'] ?? '8080', 10);
@@ -80,6 +78,9 @@ function parseConfig(raw: unknown): WindsorConfig {
     }
     if (typeof obj['passwordHash'] === 'string') result.passwordHash = obj['passwordHash'];
     if (typeof obj['iconCacheDir'] === 'string') result.iconCacheDir = obj['iconCacheDir'];
+    if (typeof obj['printConfig'] === 'object' && obj['printConfig'] !== null) {
+        result.printConfig = obj['printConfig'] as import('./types.ts').PrintConfig;
+    }
     return result;
 }
 
@@ -111,7 +112,6 @@ export async function updateConfig(patch: Partial<WindsorConfig>): Promise<Winds
     return _config;
 }
 
-// ─── Password hashing ─────────────────────────────────────────────────────────
 
 export function hashPassword(password: string): string {
     return createHash('sha256').update(password).digest('hex');
@@ -122,7 +122,6 @@ export function checkPassword(password: string): boolean {
     return hashPassword(password) === _config.passwordHash;
 }
 
-// ─── Channel reconciliation ───────────────────────────────────────────────────
 
 export interface DiscordChannelInfo {
     id: string;

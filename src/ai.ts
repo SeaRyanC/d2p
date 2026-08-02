@@ -11,7 +11,6 @@ const MODEL = 'gpt-5.4-nano';
 const IMAGE_MODEL = 'gpt-image-1-mini';
 const TOKEN_LIMIT_24H = 200_000;
 
-// ─── Token tracking ───────────────────────────────────────────────────────────
 
 export function trackTokenUsage(tokens: number): void {
     const config = getCurrentConfig();
@@ -44,7 +43,6 @@ export async function isOverTokenLimit(): Promise<boolean> {
     return false;
 }
 
-// ─── OpenAI client ────────────────────────────────────────────────────────────
 
 function getClient(): OpenAI | null {
     const key = getCurrentConfig().openaiKey;
@@ -52,7 +50,6 @@ function getClient(): OpenAI | null {
     return new OpenAI({ apiKey: key });
 }
 
-// ─── Recurring schedule parsing ───────────────────────────────────────────────
 
 const ScheduleSchema = z.object({
     'message without schedule': z.string(),
@@ -152,14 +149,12 @@ function formatScheduleDate(date: Date): string {
 
 export { formatScheduleDate };
 
-// ─── Ask AI for next occurrence of a recurring task ───────────────────────────
 
 export async function getNextOccurrence(originalMessage: string, now: Date): Promise<Date | null> {
     const result = await parseRecurringSchedule(originalMessage, now);
     return result ? result.nextOccurrence : null;
 }
 
-// ─── Icon generation ──────────────────────────────────────────────────────────
 
 export async function generateIcon(text: string, cacheDir: string): Promise<string | null> {
     const prompt = `Black-on-transparent line drawing icon for the TODO item: "${text}". Do not produce any text. Use big, thick lines. No fine detailing.`;

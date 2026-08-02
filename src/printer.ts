@@ -6,7 +6,6 @@ import type { PrintJob } from './types.ts';
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
-// ─── ESC/P constants ──────────────────────────────────────────────────────────
 
 const ESC = '\x1B';
 const GS = '\x1D';
@@ -33,7 +32,6 @@ const LF = '\n';
 const CHARS_NORMAL = 48;
 const CHARS_DOUBLE = 24;
 
-// ─── Text wrapping ────────────────────────────────────────────────────────────
 
 function wrapText(text: string, width: number): string[] {
     const words = text.split(' ');
@@ -53,7 +51,6 @@ function wrapText(text: string, width: number): string[] {
     return lines.length > 0 ? lines : [''];
 }
 
-// ─── Font size selection based on total lines ─────────────────────────────────
 
 function chooseFontForLines(totalLines: number): { fontSize: string; charsPerLine: number } {
     if (totalLines <= 4) {
@@ -65,7 +62,6 @@ function chooseFontForLines(totalLines: number): { fontSize: string; charsPerLin
     }
 }
 
-// ─── Printer detection ────────────────────────────────────────────────────────
 
 export async function getConnectedPrinter(): Promise<string | null> {
     // Try CUPS first
@@ -92,7 +88,6 @@ export async function getConnectedPrinter(): Promise<string | null> {
     return null;
 }
 
-// ─── ESC/P image printing (raster) ───────────────────────────────────────────
 
 /** Decode a simple PNG into raw RGBA pixels using Node built-in. Returns null if can't decode. */
 async function loadImageForPrinting(path: string): Promise<{ width: number; height: number; pixels: Buffer } | null> {
@@ -103,7 +98,6 @@ async function loadImageForPrinting(path: string): Promise<{ width: number; heig
     return null;
 }
 
-// ─── Format a PrintJob to a Buffer of ESC/P bytes ────────────────────────────
 
 export async function formatPrintJob(job: PrintJob): Promise<Buffer> {
     const parts: string[] = [];
@@ -196,7 +190,6 @@ export async function formatPrintJob(job: PrintJob): Promise<Buffer> {
     return Buffer.from(parts.join(''), 'utf8');
 }
 
-// ─── Send to printer ──────────────────────────────────────────────────────────
 
 export async function printJob(job: PrintJob, printerName?: string): Promise<void> {
     const printer = printerName ?? await getConnectedPrinter();
@@ -223,7 +216,6 @@ export async function printJob(job: PrintJob, printerName?: string): Promise<voi
     }
 }
 
-// ─── Test page ────────────────────────────────────────────────────────────────
 
 export async function printTestPage(printerName: string): Promise<void> {
     const testJob: PrintJob = {
@@ -258,7 +250,6 @@ export async function printTestPage(printerName: string): Promise<void> {
     }
 }
 
-// ─── Timestamp formatting ─────────────────────────────────────────────────────
 
 export function formatTimestamp(date: Date): string {
     const year = date.getFullYear();

@@ -3,7 +3,6 @@ import { render } from 'preact';
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type BehaviorType = 'immediate-print' | 'accumulating-list' | 'recurring-print' | 'on-demand';
 
@@ -56,7 +55,6 @@ interface ChannelsData {
     unmapped: DiscordChannel[];
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const S = {
     box: { background: '#151922', border: '1px solid #2b3340', borderRadius: '10px', padding: '16px', marginBottom: '16px' } as JSX.CSSProperties,
@@ -77,7 +75,6 @@ const S = {
     mono: { fontFamily: 'monospace', fontSize: '0.85em' } as JSX.CSSProperties,
 };
 
-// ─── Fetch helper ─────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
     const res = await fetch(url, options);
@@ -106,7 +103,6 @@ async function jsonDelete<T>(url: string): Promise<T> {
     return apiFetch<T>(url, { method: 'DELETE' });
 }
 
-// ─── Field component ──────────────────────────────────────────────────────────
 
 function Field({ label, type = 'text', value, onChange, placeholder }: {
     label: string;
@@ -142,7 +138,6 @@ function CheckField({ label, checked, onChange }: {
     );
 }
 
-// ─── Behavior sub-config ──────────────────────────────────────────────────────
 
 function BehaviorConfig({ config, onChange }: {
     config: ChannelBehaviorConfig;
@@ -190,7 +185,6 @@ function BehaviorConfig({ config, onChange }: {
     );
 }
 
-// ─── Channel Row ──────────────────────────────────────────────────────────────
 
 function ChannelRow({ mapping, onDelete, onUpdate }: {
     mapping: ChannelMapping;
@@ -233,7 +227,6 @@ function ChannelRow({ mapping, onDelete, onUpdate }: {
     );
 }
 
-// ─── Sections ─────────────────────────────────────────────────────────────────
 
 function BotSetup({ config, onSave }: {
     config: ConfigData | null;
@@ -387,24 +380,75 @@ function ChannelBehaviors({ refreshKey }: { refreshKey?: number }): JSX.Element 
     );
 }
 
-function PrinterSection(): JSX.Element {
-    const [printer, setPrinter] = useState<string | null>(null);
-    const [testing, setTesting] = useState(false);
+
+type PrintMode = 'escp' | 'cups' | 'imagefeed';
+
+interface EscpPrintConfig { mode: 'escp'; serialPort: string; }
+interface CupsPrintConfig { mode: 'cups'; printerName: string; paperSize: string; paperName: string; }
+interface ImageFeedConfig { mode: 'imagefeed'; }
+type PrintConfig = EscpPrintConfig | CupsPrintConfig | ImageFeedConfig;
+
+
+function PrintModeSection(): JSX.Element {
+    const [printConfig, setPrintConfig] = useState<PrintConfig | null>(null);
+    const [mode, setMode] = useState<PrintMode>('escp');
+    // escp fields
+    const [serialPort, setSerialPort] = useState('/dev/ttyUSB0');
+    // cups fields
+    const [printerName, setPrinterName] = useState('');
+    const [paperSize, setPaperSize] = useState('Letter');
+    const [paperName, setPaperName] = useState('');
     const [msg, setMsg] = useState('');
     const [err, setErr] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [testing, setTesting] = useState(false);
 
     async function load(): Promise<void> {
-        const d = await apiFetch<{ printer: string | null }>('/api/printer');
-        setPrinter(d.printer);
+        try {
+            const d = await apiFetch<{ printConfig: PrintConfig | null }>('/api/print-config');
+            if (d.printConfig) {
+                setPrintConfig(d.printConfig);
+                setMode(d.printConfig.mode);
+                if (d.printConfig.mode === 'escp') setSerialPort(d.printConfig.serialPort);
+                if (d.printConfig.mode === 'cups') {
+                    setPrinterName(d.printConfig.printerName);
+                    setPaperSize(d.printConfig.paperSize);
+                    setPaperName(d.printConfig.paperName);
+                }
+            }
+        } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+        }
     }
 
     useEffect(() => { void load(); }, []);
 
-    async function testPage(): Promise<void> {
+    async function save(): Promise<void> {
+        setSaving(true); setErr(''); setMsg('');
+        try {
+            let cfg: PrintConfig;
+            if (mode === 'escp') {
+                cfg = { mode: 'escp', serialPort: serialPort.trim() };
+            } else if (mode === 'cups') {
+                cfg = { mode: 'cups', printerName: printerName.trim(), paperSize: paperSize.trim(), paperName: paperName.trim() };
+            } else {
+                cfg = { mode: 'imagefeed' };
+            }
+            await jsonPost('/api/print-config', { printConfig: cfg });
+            setPrintConfig(cfg);
+            setMsg('Print mode saved.');
+        } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function testPrint(): Promise<void> {
         setTesting(true); setErr(''); setMsg('');
         try {
             await jsonPost('/api/printer/test', {});
-            setMsg('Test page sent to printer.');
+            setMsg(mode === 'imagefeed' ? 'Test job added to image feed.' : 'Test page sent to printer.');
         } catch (e) {
             setErr(e instanceof Error ? e.message : String(e));
         } finally {
@@ -412,15 +456,66 @@ function PrinterSection(): JSX.Element {
         }
     }
 
+    const modeLabel: Record<PrintMode, string> = {
+        escp: '🔌 ESC/P via Serial Port',
+        cups: '📄 PDF via CUPS',
+        imagefeed: '🖼️ Image Feed (testing)',
+    };
+
     return (
         <section style={S.box}>
-            <h2 style={{ marginTop: 0 }}>Printer</h2>
+            <h2 style={{ marginTop: 0 }}>Print Mode</h2>
             {err && <p style={S.err}>{err}</p>}
             {msg && <p style={S.ok}>{msg}</p>}
-            <p>Connected printer: <strong>{printer ?? 'None detected'}</strong></p>
-            <button style={S.btn} onClick={() => void testPage()} disabled={!printer || testing}>
-                {testing ? 'Printing…' : 'Print Test Page'}
-            </button>
+
+            <label style={S.label}>
+                <span style={S.labelText}>Output Mode</span>
+                <select
+                    style={S.select}
+                    value={mode}
+                    onChange={e => setMode((e.currentTarget as HTMLSelectElement).value as PrintMode)}
+                >
+                    {(['escp', 'cups', 'imagefeed'] as PrintMode[]).map(m => (
+                        <option key={m} value={m}>{modeLabel[m]}</option>
+                    ))}
+                </select>
+            </label>
+
+            {mode === 'escp' && (
+                <Field
+                    label="Serial Port"
+                    value={serialPort}
+                    onChange={setSerialPort}
+                    placeholder="e.g. /dev/ttyUSB0 or COM3"
+                />
+            )}
+
+            {mode === 'cups' && <>
+                <Field label="CUPS Printer Name" value={printerName} onChange={setPrinterName} placeholder="e.g. TM-T88V" />
+                <Field label="Paper Size" value={paperSize} onChange={setPaperSize} placeholder="e.g. Letter, A4, 80x297mm" />
+                <Field label="Paper Name (display label)" value={paperName} onChange={setPaperName} placeholder="e.g. Receipt Roll" />
+            </>}
+
+            {mode === 'imagefeed' && (
+                <p style={{ color: '#b4bdc8', marginTop: 0 }}>
+                    Print jobs will be rendered as PNGs and shown at{' '}
+                    <a href="/feed" target="_blank" rel="noopener noreferrer">/feed</a>.
+                </p>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <button style={S.btn} onClick={() => void save()} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                    style={{ ...S.btn, background: '#1a7a3a' }}
+                    onClick={() => void testPrint()}
+                    disabled={testing || !printConfig}
+                    title={!printConfig ? 'Save a mode first' : ''}
+                >
+                    {testing ? 'Printing…' : 'Print Test Page'}
+                </button>
+            </div>
         </section>
     );
 }
@@ -551,7 +646,6 @@ function RestartSection(): JSX.Element {
     );
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
 
 function App(): JSX.Element {
     const [config, setConfig] = useState<ConfigData | null>(null);
@@ -574,7 +668,7 @@ function App(): JSX.Element {
             <h1 style={{ marginTop: 0 }}>🖨️ Windsor Control Panel</h1>
             <BotSetup config={config} onSave={handleSave} />
             <ChannelBehaviors refreshKey={refreshKey} />
-            <PrinterSection />
+            <PrintModeSection />
             <SecuritySection onSave={() => void loadConfig()} />
             <LogSection />
             <RestartSection />

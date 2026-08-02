@@ -9,8 +9,8 @@ import {
     hashPassword,
     getConfigFilePath,
 } from './config.ts';
-import { getConnectedPrinter, printTestPage } from './printer.ts';
-import type { DiagnosticEvent, BotStatus } from './types.ts';
+import { printTestPage, getImageFeed, clearImageFeed, renderFeedHtml } from './printing/index.ts';
+import type { DiagnosticEvent, BotStatus, PrintConfig } from './types.ts';
 
 const MAX_EVENTS = 200;
 const events: DiagnosticEvent[] = [];
@@ -30,7 +30,6 @@ export function logEvent(type: DiagnosticEvent['type'], message: string): void {
     console.log(`[${event.timestamp}] [${type.toUpperCase()}] ${message}`);
 }
 
-// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 function checkAuth(req: IncomingMessage): boolean {
     const config = getCurrentConfig();
@@ -59,7 +58,6 @@ function requireAuth(req: IncomingMessage, res: ServerResponse): boolean {
     return true;
 }
 
-// ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
     const body = JSON.stringify(payload, null, 2);
@@ -88,7 +86,6 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
     return parsed as Record<string, unknown>;
 }
 
-// ─── Web app bundle ───────────────────────────────────────────────────────────
 
 let appBundleCache: { script: string; mtimeMs: number } | null = null;
 
@@ -137,7 +134,6 @@ function renderHtmlShell(): string {
 </html>`;
 }
 
-// ─── HTTP server ──────────────────────────────────────────────────────────────
 
 /** Registered Discord channels (set by bot on startup) */
 let discordChannels: Array<{ id: string; name: string }> = [];
@@ -173,11 +169,21 @@ export function startDiagnosticsServer(port: number): void {
                 res.end(html);
                 return;
             }
+            if (method === 'GET' && urlPath === '/feed') {
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end(renderFeedHtml());
+                return;
+            }
+
+            if (method === 'POST' && urlPath === '/feed/clear') {
+                clearImageFeed();
+                res.writeHead(303, { 'Location': '/feed' });
+                res.end();
+                return;
+            }
 
             // All API routes require auth
             if (!requireAuth(req, res)) return;
-
-            // ── Events / status ──────────────────────────────────────────────
             if (method === 'GET' && urlPath === '/api/events') {
                 sendJson(res, 200, { status, events: [...events].reverse() });
                 return;
@@ -187,8 +193,6 @@ export function startDiagnosticsServer(port: number): void {
                 sendJson(res, 200, status);
                 return;
             }
-
-            // ── Config ───────────────────────────────────────────────────────
             if (method === 'GET' && urlPath === '/api/config') {
                 const cfg = getCurrentConfig();
                 sendJson(res, 200, {
@@ -240,8 +244,6 @@ export function startDiagnosticsServer(port: number): void {
                 });
                 return;
             }
-
-            // ── Channels ──────────────────────────────────────────────────────
             if (method === 'GET' && urlPath === '/api/channels') {
                 const config = getCurrentConfig();
                 sendJson(res, 200, {
@@ -285,27 +287,28 @@ export function startDiagnosticsServer(port: number): void {
                     return;
                 }
             }
+            if (method === 'GET' && urlPath === '/api/print-config') {
+                const cfg = getCurrentConfig();
+                sendJson(res, 200, { printConfig: cfg.printConfig ?? null });
+                return;
+            }
 
-            // ── Printer ───────────────────────────────────────────────────────
-            if (method === 'GET' && urlPath === '/api/printer') {
-                const printerName = await getConnectedPrinter();
-                sendJson(res, 200, { printer: printerName });
+            if ((method === 'POST' || method === 'PUT') && urlPath === '/api/print-config') {
+                const body = await readJsonBody(req);
+                const printConfig = body['printConfig'] as PrintConfig | null;
+                const patch: Partial<import('./types.ts').WindsorConfig> = {};
+                if (printConfig != null) patch.printConfig = printConfig;
+                await updateConfig(patch);
+                sendJson(res, 200, { printConfig: getCurrentConfig().printConfig ?? null });
                 return;
             }
 
             if (method === 'POST' && urlPath === '/api/printer/test') {
-                const printerName = await getConnectedPrinter();
-                if (!printerName) {
-                    sendJson(res, 503, { error: 'No printer connected' });
-                    return;
-                }
-                await printTestPage(printerName);
+                await printTestPage();
                 logEvent('print', 'Test page printed');
                 sendJson(res, 200, { ok: true });
                 return;
             }
-
-            // ── Restart ───────────────────────────────────────────────────────
             if (method === 'POST' && urlPath === '/api/restart') {
                 logEvent('info', 'Restart requested via API');
                 sendJson(res, 200, { ok: true });

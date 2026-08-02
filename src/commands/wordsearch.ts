@@ -1,6 +1,5 @@
-import { printJob } from '../printer.ts';
 import type { PrintJob } from '../types.ts';
-import type { Command, CommandResultPass } from './index.ts';
+import type { Command, CommandResultPass, CommandRunContext } from './index.ts';
 import { tryExecCommandFunction } from './util.ts';
 
 const THEMES: Array<{ name: string; words: string[] }> = [
@@ -82,7 +81,7 @@ function renderGrid(grid: string[][]): string[] {
     return grid.map(row => row.join(' '));
 }
 
-async function printWordsearchWorker(): Promise<CommandResultPass> {
+async function printWordsearchWorker(_args: string, ctx: CommandRunContext): Promise<CommandResultPass> {
     const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
     if (!theme) throw new Error('No themes available');
 
@@ -106,7 +105,7 @@ async function printWordsearchWorker(): Promise<CommandResultPass> {
         lines,
     };
 
-    await printJob(job);
+    await ctx.printJob(job);
 
     return {
         kind: "pass"
