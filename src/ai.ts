@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { mkdir, writeFile, readFile, access } from 'fs/promises';
 import { join } from 'path';
 import OpenAI from 'openai';
-import { zodTextFormat } from 'openai/helpers/zod.js';
+import { zodResponseFormat } from 'openai/helpers/zod.js';
 import { z } from 'zod/v4';
 import { getCurrentConfig, updateConfig } from './config.ts';
 import { logEvent } from './server.ts';
@@ -91,7 +91,7 @@ export async function parseRecurringSchedule(userMessage: string, now: Date): Pr
                 model: MODEL,
                 reasoning_effort: 'low',
                 messages: [{ role: 'user', content: prompt }],
-                text: zodTextFormat(ScheduleSchema, 'schedule'),
+                response_format: zodResponseFormat(ScheduleSchema, 'schedule'),
             } as Parameters<typeof client.chat.completions.create>[0]) as import("openai/resources/chat/completions/completions.js").ChatCompletion;
             const content = completion.choices[0]?.message?.content;
             if (content) {

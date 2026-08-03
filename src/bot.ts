@@ -213,10 +213,19 @@ export function createWindsorBot(): WindsorBotHandle {
                 const mapping = config.channels.find(m => m.channelId === textCh.id);
                 if (!mapping) continue;
 
-                const limit = mapping.config.type === 'recurring-print' ? 500 : 100;
                 try {
-                    const messages = await textCh.messages.fetch({ limit });
-                    const sorted = [...messages.values()].sort((a, b) =>
+                    let fetchedMessages;
+                    if (mapping.config.type === 'recurring-print') {
+                        const page1 = await textCh.messages.fetch({ limit: 100 });
+                        const oldest = [...page1.values()].reduce((a, b) =>
+                            BigInt(a.id) < BigInt(b.id) ? a : b
+                        );
+                        const page2 = await textCh.messages.fetch({ limit: 100, before: oldest.id });
+                        fetchedMessages = new Map([...page1, ...page2]);
+                    } else {
+                        fetchedMessages = await textCh.messages.fetch({ limit: 100 });
+                    }
+                    const sorted = [...fetchedMessages.values()].sort((a, b) =>
                         Number(BigInt(a.id) - BigInt(b.id))
                     );
                     await processBehaviorStartup(textCh, mapping.config, sorted);
