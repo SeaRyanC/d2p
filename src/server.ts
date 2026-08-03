@@ -148,6 +148,12 @@ export function setRestartHandler(fn: () => Promise<void>): void {
     _restartHandler = fn;
 }
 
+let _refreshChannelsHandler: (() => Promise<void>) | null = null;
+
+export function setRefreshChannelsHandler(fn: () => Promise<void>): void {
+    _refreshChannelsHandler = fn;
+}
+
 export function startDiagnosticsServer(port: number): void {
     const server = createServer(async (req, res) => {
         try {
@@ -314,6 +320,23 @@ export function startDiagnosticsServer(port: number): void {
                 sendJson(res, 200, { ok: true });
                 if (_restartHandler) {
                     void _restartHandler();
+                }
+                return;
+            }
+
+            if (method === 'POST' && urlPath === '/api/channels/refresh') {
+                if (_refreshChannelsHandler) {
+                    await _refreshChannelsHandler();
+                    const config = getCurrentConfig();
+                    sendJson(res, 200, {
+                        channels: config.channels,
+                        discordChannels,
+                        unmapped: discordChannels.filter(dc =>
+                            !config.channels.find(m => m.channelId === dc.id)
+                        ),
+                    });
+                } else {
+                    sendJson(res, 503, { error: 'Bot not connected' });
                 }
                 return;
             }

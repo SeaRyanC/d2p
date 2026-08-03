@@ -1,5 +1,5 @@
 import { loadConfig, getCurrentConfig } from './config.ts';
-import { logEvent, startDiagnosticsServer, setDiscordChannels, setRestartHandler } from './server.ts';
+import { logEvent, startDiagnosticsServer, setDiscordChannels, setRestartHandler, setRefreshChannelsHandler } from './server.ts';
 import { createWindsorBot, checkScheduledTasks } from './bot.ts';
 import { ChannelType } from 'discord.js';
 
@@ -68,4 +68,31 @@ setInterval(() => {
 }, 30_000);
 
 setRestartHandler(restartBot);
+
+async function refreshChannels(): Promise<void> {
+    if (!bot) {
+        logEvent('info', 'Cannot refresh channels: bot not connected');
+        return;
+    }
+    logEvent('info', 'Refreshing Discord channels…');
+    const guilds = [...bot.getClient().guilds.cache.values()];
+    const channels: Array<{ id: string; name: string }> = [];
+    for (const guild of guilds) {
+        const fetched = await guild.channels.fetch();
+        for (const ch of fetched.values()) {
+            if (
+                ch?.isTextBased() &&
+                'name' in ch &&
+                ch.type !== ChannelType.GuildVoice &&
+                ch.type !== ChannelType.GuildStageVoice
+            ) {
+                channels.push({ id: ch.id, name: (ch as { name: string }).name });
+            }
+        }
+    }
+    setDiscordChannels(channels);
+    logEvent('info', `Refreshed ${channels.length} Discord channels`);
+}
+
+setRefreshChannelsHandler(refreshChannels);
 await startBot();

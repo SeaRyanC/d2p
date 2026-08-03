@@ -327,11 +327,20 @@ function ChannelBehaviors({ refreshKey }: { refreshKey?: number }): JSX.Element 
         await load();
     }
 
+    async function refreshFromDiscord(): Promise<void> {
+        try {
+            const d = await apiFetch<ChannelsData>('/api/channels/refresh', { method: 'POST' });
+            setData(d);
+        } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+        }
+    }
+
     return (
         <section style={S.box}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                 <h2 style={{ marginTop: 0, marginBottom: 0 }}>Channel Behaviors</h2>
-                <button style={{ ...S.btn, marginRight: 0 }} onClick={() => void load()}>Refresh Channels</button>
+                <button style={{ ...S.btn, marginRight: 0 }} onClick={() => void refreshFromDiscord()}>Refresh Channels</button>
             </div>
             {err && <p style={S.err}>{err}</p>}
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px' }}>

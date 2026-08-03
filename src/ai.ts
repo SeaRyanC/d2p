@@ -149,12 +149,10 @@ function formatScheduleDate(date: Date): string {
 
 export { formatScheduleDate };
 
-
 export async function getNextOccurrence(originalMessage: string, now: Date): Promise<Date | null> {
     const result = await parseRecurringSchedule(originalMessage, now);
     return result ? result.nextOccurrence : null;
 }
-
 
 export async function generateIcon(text: string, cacheDir: string): Promise<string | null> {
     const prompt = `Black-on-transparent line drawing icon for the TODO item: "${text}". Do not produce any text. Use big, thick lines. No fine detailing.`;

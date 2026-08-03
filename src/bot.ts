@@ -446,7 +446,7 @@ export function createWindsorBot(): WindsorBotHandle {
         const lines = items.map(m => {
             const urls = extractUrls(m.content);
             const text = replaceUrlsInText(m.content, urls);
-            return config.includeChecklist ? `☐ ${text}` : text;
+            return config.includeChecklist ? `[_] ${text}` : text;
         });
 
         const job: PrintJob = { lines, urls: [] };
@@ -592,7 +592,7 @@ export function createWindsorBot(): WindsorBotHandle {
                     }
                 } else {
                     void (result.kind satisfies 'fail');
-                    await reactSafe(message, "❌");
+                    await reactSafe(message, Reaction.fail);
                     await replySafe(message, result.reason);
                 }
                 break;
