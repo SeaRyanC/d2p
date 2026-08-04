@@ -8,7 +8,8 @@
     "prepare": "npm run build",
     "build": "tsc && node scripts/build-web.mjs",
     "dev": "node src/index.ts",
-    "test": "node --test src/tests/*.test.ts"
+    "test": "node --test src/tests/*.test.ts",
+    "generate-wordsearches": "node scripts/generate-wordsearches.mjs"
   },
   "bin": {
     "windsor-bot": "dist/index.js"

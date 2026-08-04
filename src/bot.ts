@@ -74,12 +74,8 @@ async function hasReaction(message: Message, emoji: Reaction): Promise<boolean> 
 }
 
 async function hasAnyReaction(message: Message) {
-    try {
-        await message.fetch();
-    } catch {
-        // ignore
-    }
     for (const v of Object.values(Reaction) as Reaction[]) {
+        if (v === Reaction.thinking) continue;
         if (message.reactions.cache.get(v)) {
             return true;
         }
@@ -87,9 +83,32 @@ async function hasAnyReaction(message: Message) {
     return false;
 }
 
+async function refreshMessage(message: Message): Promise<void> {
+    try {
+        await message.fetch();
+    } catch {
+        // continue with the cached message if refresh fails
+    }
+}
+
+async function removeReactionSafe(message: Message, emoji: Reaction): Promise<void> {
+    try {
+        const reaction = message.reactions.cache.get(emoji);
+        if (reaction?.me) await reaction.users.remove();
+    } catch {
+        // ignore
+    }
+}
+
 async function reactSafe(message: Message, emoji: Reaction): Promise<void> {
     try {
         await message.react(emoji);
+        if (emoji !== Reaction.thinking) {
+            await removeReactionSafe(message, Reaction.thinking);
+        }
+        if (emoji === Reaction.ok) {
+            await removeReactionSafe(message, Reaction.fail);
+        }
     } catch {
         // ignore
     }
@@ -108,12 +127,17 @@ function isPrintTrigger(content: string): boolean {
     return content.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'print';
 }
 
+function isCommandMessage(content: string): boolean {
+    const trimmed = content.trim();
+    return trimmed.startsWith('!') || trimmed.startsWith('/');
+}
+
 
 export interface WindsorBotHandle {
     start(token: string): Promise<void>;
     destroy(): void;
     getClient(): Client;
-    handleImmediatePrint(message: Message, config: ImmediatePrintConfig): Promise<void>;
+    handleImmediatePrint(message: Message, config: ImmediatePrintConfig, retryFailed?: boolean): Promise<void>;
     handleAccumulatingPrint(triggerMessage: Message, config: AccumulatingListConfig, allMessages: Message[]): Promise<void>;
     handleRecurringSetup(message: Message, config: RecurringPrintConfig): Promise<void>;
     executeRecurringTask(scheduleReply: Message, config: RecurringPrintConfig): Promise<void>;
@@ -250,6 +274,10 @@ export function createWindsorBot(): WindsorBotHandle {
                     if (msg.author.bot) continue;
                     if (msg.reference) continue;
                     if (msg.author.id === botId) continue;
+                    if (isCommandMessage(msg.content)) {
+                        await handleOnDemand(msg);
+                        continue;
+                    }
                     if (await hasAnyReaction(msg)) continue;
                     await handleImmediatePrint(msg, config);
                 }
@@ -338,7 +366,11 @@ export function createWindsorBot(): WindsorBotHandle {
 
         switch (mapping.config.type) {
             case 'immediate-print':
-                await handleImmediatePrint(message, mapping.config);
+                if (isCommandMessage(message.content)) {
+                    await handleOnDemand(message);
+                } else {
+                    await handleImmediatePrint(message, mapping.config);
+                }
                 break;
             case 'accumulating-list': {
                 if (isPrintTrigger(message.content)) {
@@ -360,7 +392,11 @@ export function createWindsorBot(): WindsorBotHandle {
         }
     }
 
-    async function handleImmediatePrint(message: Message, config: ImmediatePrintConfig): Promise<void> {
+    async function handleImmediatePrint(
+        message: Message,
+        config: ImmediatePrintConfig,
+        retryFailed = false,
+    ): Promise<void> {
         const rawContent = message.content;
         const urls = extractUrls(rawContent);
         const textWithLinkLabels = replaceUrlsInText(rawContent, urls);
@@ -386,8 +422,18 @@ export function createWindsorBot(): WindsorBotHandle {
 
         if (config.includeIcon) {
             const iconCacheDir = getCurrentConfig().iconCacheDir ?? './icon-cache';
-            const iconPath = await generateIcon(strippedText, iconCacheDir);
+            const iconPath = await generateIcon(strippedText, iconCacheDir, () =>
+                reactSafe(message, Reaction.thinking)
+            );
             if (iconPath) job.iconPath = iconPath;
+        }
+
+        await refreshMessage(message);
+        if (await hasAnyReaction(message)) {
+            if (!retryFailed || !message.reactions.cache.get(Reaction.fail)?.me) {
+                await removeReactionSafe(message, Reaction.thinking);
+                return;
+            }
         }
 
         try {
@@ -465,6 +511,9 @@ export function createWindsorBot(): WindsorBotHandle {
             job.metadataLines = [`Printed at ${formatTimestamp(new Date())}`];
         }
 
+        await refreshMessage(triggerMessage);
+        if (await hasAnyReaction(triggerMessage)) return;
+
         try {
             await printJob(job);
             await reactSafe(triggerMessage, Reaction.ok);
@@ -480,7 +529,9 @@ export function createWindsorBot(): WindsorBotHandle {
         const rawContent = message.content;
 
         try {
-            const parsed = await parseRecurringSchedule(rawContent, new Date());
+            const parsed = await parseRecurringSchedule(rawContent, new Date(), () =>
+                reactSafe(message, Reaction.thinking)
+            );
             if (!parsed) {
                 await reactSafe(message, Reaction.what);
                 await replySafe(message, '⁉️ Could not parse a schedule from your message. Please try again with a clearer schedule.');
@@ -523,8 +574,16 @@ export function createWindsorBot(): WindsorBotHandle {
         }
         if (config.includeIcon) {
             const iconCacheDir = getCurrentConfig().iconCacheDir ?? './icon-cache';
-            const iconPath = await generateIcon(strippedText, iconCacheDir);
+            const iconPath = await generateIcon(strippedText, iconCacheDir, () =>
+                reactSafe(scheduleReply, Reaction.thinking)
+            );
             if (iconPath) job.iconPath = iconPath;
+        }
+
+        await refreshMessage(scheduleReply);
+        if (await hasAnyReaction(scheduleReply)) {
+            await removeReactionSafe(scheduleReply, Reaction.thinking);
+            return;
         }
 
         const printedAt = formatTimestamp(new Date());
@@ -532,6 +591,7 @@ export function createWindsorBot(): WindsorBotHandle {
         try {
             await printJob(job);
         } catch (err) {
+            await removeReactionSafe(scheduleReply, Reaction.thinking);
             logEvent('error', `Recurring print failed: ${err}`);
             return;
         }
@@ -539,7 +599,9 @@ export function createWindsorBot(): WindsorBotHandle {
         logEvent('print', `Printed recurring task: ${text}`);
 
         const originalUserMessage = scheduleReply.content.replace(/^Got it\. I will print ⟪.+?⟫ at /, '');
-        const nextOccurrence = await getNextOccurrence(originalUserMessage, new Date());
+        const nextOccurrence = await getNextOccurrence(originalUserMessage, new Date(), () =>
+            reactSafe(scheduleReply, Reaction.thinking)
+        );
 
         let statusReply: Message | null;
         if (!nextOccurrence) {
@@ -552,6 +614,7 @@ export function createWindsorBot(): WindsorBotHandle {
         if (statusReply) {
             await reactSafe(statusReply, Reaction.ok);
         }
+        await removeReactionSafe(scheduleReply, Reaction.thinking);
 
         if (nextOccurrence && statusReply) {
             scheduleRecurringTask(scheduleReply, nextOccurrence, config, bot);
@@ -566,9 +629,12 @@ export function createWindsorBot(): WindsorBotHandle {
         const match = /⟪(.+?)⟫/.exec(scheduleReply.content);
         if (!match?.[1]) return;
 
-        const nextOccurrence = await getNextOccurrence(match[1], new Date());
+        const nextOccurrence = await getNextOccurrence(match[1], new Date(), () =>
+            reactSafe(latestStatusReply, Reaction.thinking)
+        );
         if (!nextOccurrence) {
             await replySafe(latestStatusReply, 'This occurrence has expired and no more prints are scheduled');
+            await removeReactionSafe(latestStatusReply, Reaction.thinking);
             return;
         }
 
@@ -576,6 +642,27 @@ export function createWindsorBot(): WindsorBotHandle {
         await replySafe(latestStatusReply, `The next print will be at ${nextStr}.`);
         await reactSafe(latestStatusReply, Reaction.ok);
         scheduleRecurringTask(scheduleReply, nextOccurrence, config, bot);
+    }
+
+    async function retryFailedMessages(message: Message): Promise<number> {
+        const mapping = getCurrentConfig().channels.find(m => m.channelId === message.channelId);
+        if (!mapping || mapping.config.type !== 'immediate-print') {
+            throw new Error('!retry is only available in immediate-print channels');
+        }
+
+        const channel = message.channel as TextChannel;
+        const messages = await channel.messages.fetch({ limit: 20, before: message.id });
+        const failed = [...messages.values()].filter(msg =>
+            !msg.author.bot &&
+            !msg.reference &&
+            !isCommandMessage(msg.content) &&
+            msg.reactions.cache.get(Reaction.fail)?.me
+        );
+
+        for (const failedMessage of failed) {
+            await handleImmediatePrint(failedMessage, mapping.config, true);
+        }
+        return failed.length;
     }
 
     async function handleOnDemand(message: Message): Promise<void> {
@@ -592,7 +679,12 @@ export function createWindsorBot(): WindsorBotHandle {
             if (cmd.aliases.some(a => commandName.localeCompare(a, undefined, { sensitivity: "base" }) == 0)) {
                 foundCommand = true;
                 logEvent('command', `Command '${commandName}' invoked by ${message.author.username}`);
-                const ctx: import('./commands/index.ts').CommandRunContext = { printJob };
+                await refreshMessage(message);
+                if (await hasAnyReaction(message)) return;
+                const ctx: import('./commands/index.ts').CommandRunContext = {
+                    printJob,
+                    retryFailedMessages: () => retryFailedMessages(message),
+                };
                 const result = await cmd.invoke(args, ctx);
                 if (result.kind === 'pass') {
                     await reactSafe(message, "✅");

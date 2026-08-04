@@ -143,7 +143,7 @@ async function pokemonWorker(args: string, ctx: CommandRunContext): Promise<Comm
 
     await ctx.printJob(job);
 
-    return { kind: 'pass', reply: `Printing #${numStr} ${name}!` };
+    return { kind: 'pass' };
 }
 
 export const printPokemon: Command = {

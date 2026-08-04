@@ -273,9 +273,9 @@ function BotSetup({ config, onSave }: {
             {config && <p style={{ color: '#b4bdc8', marginTop: 0 }}>Config: {config.configPath}</p>}
             {err && <p style={S.err}>{err}</p>}
             {msg && <p style={S.ok}>{msg}</p>}
-            <Field label="Discord Token" value={discordToken} onChange={setDiscordToken} placeholder="Discord bot token" />
-            <Field label="Server ID (required)" value={serverId} onChange={setServerId} placeholder="Required — Discord server ID" />
-            <Field label="OpenAI Key" value={openaiKey} onChange={setOpenaiKey} placeholder="OpenAI API key" />
+            <Field label="Discord Token" value={discordToken} onChange={setDiscordToken} placeholder={makeFakeDiscordToken()} />
+            <Field label="Server ID" value={serverId} onChange={setServerId} placeholder={makeFakeServerID()} />
+            <Field label="OpenAI Key (optional)" value={openaiKey} onChange={setOpenaiKey} placeholder="OpenAI API key" />
             <Field label="Diagnostics Port" type="number" value={diagnosticsPort} onChange={setDiagnosticsPort} placeholder="8080" />
             <button style={S.btn} onClick={() => void save()} disabled={saving}>
                 {saving ? 'Saving…' : 'Save'}
@@ -683,6 +683,29 @@ function App(): JSX.Element {
             <RestartSection />
         </main>
     );
+}
+
+const Base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const Numeric = "0123456789";
+
+function randomChars(alphabet: string, length: number): string {
+    let out = "";
+    for (let i = 0; i < length; i++) {
+        out += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+    return out;
+}
+
+function makeFakeDiscordToken(): string {
+    return [
+        randomChars(Base64, 24),
+        randomChars(Base64, 6),
+        randomChars(Base64, 32),
+    ].join(".");
+}
+
+function makeFakeServerID(): string {
+    return randomChars(Numeric, 14);
 }
 
 const root = document.getElementById('app');
