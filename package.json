@@ -11,7 +11,7 @@
     "test": "node --test src/tests/*.test.ts"
   },
   "bin": {
-    "windsor-bot": "./dist/index.js"
+    "windsor-bot": "dist/index.js"
   },
   "files": [
     "dist",
