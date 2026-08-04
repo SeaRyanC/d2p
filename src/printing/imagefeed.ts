@@ -85,8 +85,8 @@ export async function renderJobToPng(job: PrintJob): Promise<Buffer> {
                 : TEXT_WIDTH / sprite.width;
             sprite.resize({ w: Math.round(sprite.width * scale), h: Math.round(sprite.height * scale), mode: ResizeStrategy.NEAREST_NEIGHBOR });
             scaledSprite = sprite;
-        } catch {
-            // silently skip
+        } catch (error) {
+            throw new Error(`Failed to load image ${job.iconPath}`, { cause: error });
         }
     }
 

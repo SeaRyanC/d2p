@@ -43,6 +43,19 @@ export async function buildPdfBuffer(job: PrintJob, paperSize: string): Promise<
             doc.moveDown(0.5);
         }
 
+        if (job.iconPath) {
+            try {
+                doc.image(job.iconPath, {
+                    fit: [doc.page.width - MARGIN * 2, 300],
+                    align: 'center',
+                    valign: 'center',
+                });
+                doc.moveDown(0.5);
+            } catch (error) {
+                throw new Error(`Failed to load image ${job.iconPath}`, { cause: error });
+            }
+        }
+
         // Primary text
         if (job.lines.length > 0) {
             doc.fontSize(bodyFontSize).font('Helvetica');

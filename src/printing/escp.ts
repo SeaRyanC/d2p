@@ -65,8 +65,8 @@ export async function buildEscpBuffer(job: PrintJob): Promise<Buffer> {
             const escImage = new Image(img.bitmap as { width: number; height: number; data: Buffer });
             await printer.draw(escImage);
             await printer.feed(1);
-        } catch {
-            // silently skip if image can't be loaded/printed
+        } catch (error) {
+            throw new Error(`Failed to load or print image ${job.iconPath}`, { cause: error });
         }
     }
 

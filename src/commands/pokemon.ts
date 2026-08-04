@@ -1,11 +1,12 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { access } from 'fs/promises';
 import type { Command, CommandResult, CommandRunContext } from './index.ts';
 import type { PrintJob } from '../types.ts';
 import { tryExecCommandFunction } from './util.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SPRITE_DIR = join(__dirname, '../assets/pokemon-sprites');
+const SPRITE_DIR = join(__dirname, '../../assets/pokemon-sprites');
 
 // Kanto Pokédex — index 0 = Bulbasaur (#1)
 const KANTO: string[] = [
@@ -127,6 +128,11 @@ async function pokemonWorker(args: string, ctx: CommandRunContext): Promise<Comm
 
     const spritePath = join(SPRITE_DIR, `${id}.png`);
     const numStr = String(id).padStart(3, '0');
+    try {
+        await access(spritePath);
+    } catch (error) {
+        throw new Error(`Pokémon sprite not found at ${spritePath}`, { cause: error });
+    }
 
     const job: PrintJob = {
         header: `#${numStr} ${name}`,
