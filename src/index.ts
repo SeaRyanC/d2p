@@ -1,9 +1,9 @@
+#!/usr/bin/env node
 import { loadConfig, getCurrentConfig } from './config.ts';
 import { logEvent, startDiagnosticsServer, setDiscordChannels, setRestartHandler, setRefreshChannelsHandler } from './server.ts';
 import { createWindsorBot, checkScheduledTasks } from './bot.ts';
 import { ChannelType } from 'discord.js';
 
-const { configPath } = await loadConfig();
 const config = getCurrentConfig();
 
 startDiagnosticsServer(config.diagnosticsPort);

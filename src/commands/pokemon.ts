@@ -5,7 +5,7 @@ import type { PrintJob } from '../types.ts';
 import { tryExecCommandFunction } from './util.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SPRITE_DIR = join(__dirname, 'pokemon-sprites');
+const SPRITE_DIR = join(__dirname, '../assets/pokemon-sprites');
 
 // Kanto Pokédex — index 0 = Bulbasaur (#1)
 const KANTO: string[] = [
@@ -112,14 +112,14 @@ async function pokemonWorker(args: string, ctx: CommandRunContext): Promise<Comm
 
     if (!args.trim()) {
         // Random
-        id = Math.floor(Math.random() * 151) + 1;
+        id = Math.floor(Math.random() * KANTO.length) + 1;
         name = KANTO[id - 1]!;
     } else {
         const found = findPokemon(args);
         if (!found) {
             return {
                 kind: 'fail',
-                reason: `Unknown Pokémon "${args.trim()}". Use a name or number 1–151.`,
+                reason: `Unknown Pokémon "${args.trim()}". Use a name or number 1-151.`,
             };
         }
         ({ id, name } = found);
@@ -141,6 +141,6 @@ async function pokemonWorker(args: string, ctx: CommandRunContext): Promise<Comm
 }
 
 export const printPokemon: Command = {
-    aliases: ['pokemon', 'pokedex'],
+    aliases: ['pokemon', 'kanto'],
     invoke: tryExecCommandFunction(pokemonWorker),
 };

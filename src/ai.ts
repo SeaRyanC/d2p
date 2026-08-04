@@ -180,7 +180,7 @@ export async function generateIcon(text: string, cacheDir: string): Promise<stri
                 prompt,
                 n: 1,
                 size: '1024x1024',
-                quality: 'auto',
+                quality: 'low',
                 background: 'transparent',
                 output_format: 'png',
             } as Parameters<typeof client.images.generate>[0]) as import("openai/resources/images.js").ImagesResponse;

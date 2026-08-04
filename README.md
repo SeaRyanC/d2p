@@ -22,6 +22,11 @@ You'll need:
 
 <!-- Write instructions on how to get the right kind of discord API token here -->
 
+## Raspbery Pi Setup
+
+Windsor runs great on a Raspberry Pi.
+
+
 ## Automatic Behaviors
 
 Windsor will automatically convert all URLs in messages to QR codes. These always appear after the message text, regardless of where they appeared in the message. If the URL was in the middle of the message, it'll be replaced with `[link]`.
