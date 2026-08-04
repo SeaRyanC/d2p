@@ -123,6 +123,6 @@ The control panel is a Preact app served by the diagnostics server and can:
 1. Show runtime bot status and recent events.
 2. Save basic setup into a local `windsor.config.json` file (Discord token, server id, etc).
 
-The browser app source lives in `src/web/app.tsx` and is bundled on-demand by the server using the esbuild API.
+The browser app source lives in `src/web/app.tsx`. It is bundled into the npm package during the build and served by the diagnostics server; development runs can still bundle the source on demand.
 
 `windsor.config.json` is gitignored because it can contain secrets.

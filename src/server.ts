@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { build } from 'esbuild';
-import { stat } from 'fs/promises';
-import { join } from 'path';
+import { readFile, stat } from 'fs/promises';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import {
     getCurrentConfig,
     updateConfig,
@@ -90,14 +91,30 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
 let appBundleCache: { script: string; mtimeMs: number } | null = null;
 
 async function loadAppScript(): Promise<string> {
-    const entryPoint = join(process.cwd(), 'src', 'web', 'app.tsx');
-    const sourceStat = await stat(entryPoint);
-    if (appBundleCache && appBundleCache.mtimeMs === sourceStat.mtimeMs) {
+    const runtimeDir = dirname(fileURLToPath(import.meta.url));
+    const bundledApp = join(runtimeDir, 'web', 'app.bundle.js');
+    const sourceEntryPoint = join(runtimeDir, '..', 'src', 'web', 'app.tsx');
+    const appPath = await stat(bundledApp).then(() => bundledApp).catch((error: unknown) => {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            return sourceEntryPoint;
+        }
+        throw error;
+    });
+    const appStat = await stat(appPath);
+    if (appPath === bundledApp) {
+        if (appBundleCache && appBundleCache.mtimeMs === appStat.mtimeMs) {
+            return appBundleCache.script;
+        }
+        const script = await readFile(appPath, 'utf8');
+        appBundleCache = { script, mtimeMs: appStat.mtimeMs };
+        return script;
+    }
+    if (appBundleCache && appBundleCache.mtimeMs === appStat.mtimeMs) {
         return appBundleCache.script;
     }
 
     const result = await build({
-        entryPoints: [entryPoint],
+        entryPoints: [sourceEntryPoint],
         bundle: true,
         write: false,
         platform: 'browser',
@@ -110,7 +127,7 @@ async function loadAppScript(): Promise<string> {
 
     const firstFile = result.outputFiles[0];
     if (!firstFile) throw new Error('Failed to generate app bundle');
-    appBundleCache = { script: firstFile.text, mtimeMs: sourceStat.mtimeMs };
+    appBundleCache = { script: firstFile.text, mtimeMs: appStat.mtimeMs };
     return firstFile.text;
 }
 
