@@ -1,3 +1,8 @@
+import { readFile, unlink, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { Jimp, JimpMime, loadFont, measureText } from 'jimp';
 import type { PrintJob } from '../types.ts';
 import type { Command, CommandResult, CommandRunContext } from './index.ts';
 import { tryExecCommandFunction } from './util.ts';
@@ -6,65 +11,87 @@ type Difficulty = 'kid' | 'easy' | 'medium' | 'hard' | '';
 
 type Grid = (number | 0)[][];
 
-function generateSudoku(difficulty: Difficulty): Grid {
-    // Start with a solved grid
-    const base: Grid = [
-        [5, 3, 4, 6, 7, 8, 9, 1, 2],
-        [6, 7, 2, 1, 9, 5, 3, 4, 8],
-        [1, 9, 8, 3, 4, 2, 5, 6, 7],
-        [8, 5, 9, 7, 6, 1, 4, 2, 3],
-        [4, 2, 6, 8, 5, 3, 7, 9, 1],
-        [7, 1, 3, 9, 2, 4, 8, 5, 6],
-        [9, 6, 1, 5, 3, 7, 2, 8, 4],
-        [2, 8, 7, 4, 1, 9, 6, 3, 5],
-        [3, 4, 5, 2, 8, 6, 1, 7, 9],
-    ];
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const SUDOKU_DIR = join(__dirname, '../../assets');
+const puzzleCache = new Map<string, Promise<Grid[]>>();
+const FONT_DIR = new URL('../../node_modules/@jimp/plugin-print/dist/fonts/open-sans/', import.meta.url).pathname;
+const SUDOKU_FONT = `${FONT_DIR}open-sans-32-black/open-sans-32-black.fnt`;
+const IMAGE_WIDTH = 560;
+const IMAGE_HEIGHT = 640;
+const GRID_SIZE = 504;
+const GRID_LEFT = (IMAGE_WIDTH - GRID_SIZE) / 2;
+const GRID_TOP = 98;
+const CELL_SIZE = GRID_SIZE / 9;
 
-    // Number of cells to remove based on difficulty
-    const removes: Record<NonNullable<Difficulty>, number> = {
-        '': 35,
-        kid: 20,
-        easy: 35,
-        medium: 45,
-        hard: 55,
-    };
-    const toRemove = removes[difficulty] ?? 35;
-
-    // Shuffle positions and remove
-    const positions = Array.from({ length: 81 }, (_, i) => i);
-    for (let i = positions.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const tmp = positions[i]!;
-        positions[i] = positions[j]!;
-        positions[j] = tmp;
+async function loadSudokus(difficulty: Exclude<Difficulty, ''>): Promise<Grid[]> {
+    let puzzles = puzzleCache.get(difficulty);
+    if (!puzzles) {
+        puzzles = readFile(join(SUDOKU_DIR, `sudoku-${difficulty}.txt`), 'utf8').then(contents => {
+            const lines = contents.split(/\r?\n/).filter(Boolean);
+            return lines.map((puzzle, index) => {
+                if (puzzle.length !== 81 || /[^.1-9]/.test(puzzle)) {
+                    throw new Error(`Invalid Sudoku puzzle at ${difficulty} asset line ${index + 1}`);
+                }
+                return Array.from({ length: 9 }, (_, row) =>
+                    Array.from(puzzle.slice(row * 9, row * 9 + 9), cell => cell === '.' ? 0 : Number(cell))
+                );
+            });
+        });
+        puzzleCache.set(difficulty, puzzles);
     }
-
-    const grid: Grid = base.map(row => [...row] as (number | 0)[]);
-    for (let i = 0; i < toRemove; i++) {
-        const pos = positions[i];
-        if (pos === undefined) break;
-        const row = Math.floor(pos / 9);
-        const col = pos % 9;
-        if (grid[row]) grid[row]![col] = 0;
-    }
-    return grid;
+    return puzzles;
 }
 
-function renderSudokuGrid(grid: Grid): string[] {
-    const lines: string[] = [];
-    lines.push('┌───────┬───────┬───────┐');
-    for (let row = 0; row < 9; row++) {
-        const cells = grid[row] ?? [];
-        const r1 = cells.slice(0, 3).map(c => c === 0 ? '·' : String(c)).join(' ');
-        const r2 = cells.slice(3, 6).map(c => c === 0 ? '·' : String(c)).join(' ');
-        const r3 = cells.slice(6, 9).map(c => c === 0 ? '·' : String(c)).join(' ');
-        lines.push(`│ ${r1} │ ${r2} │ ${r3} │`);
-        if (row === 2 || row === 5) {
-            lines.push('├───────┼───────┼───────┤');
+async function renderSudokuImage(grid: Grid, difficulty: Exclude<Difficulty, ''>): Promise<string> {
+    const font = await loadFont(SUDOKU_FONT);
+    const image = new Jimp({ width: IMAGE_WIDTH, height: IMAGE_HEIGHT, color: 0xffffffff });
+    const title = `Sudoku - ${difficulty}`;
+    image.print({
+        font,
+        x: (IMAGE_WIDTH - measureText(font, title)) / 2,
+        y: 24,
+        text: title,
+    });
+
+    for (let row = 0; row < 10; row++) {
+        const thickness = row % 3 === 0 ? 4 : 1;
+        const y = Math.round(GRID_TOP + row * CELL_SIZE);
+        for (let offset = 0; offset < thickness; offset++) {
+            for (let x = GRID_LEFT; x <= GRID_LEFT + GRID_SIZE; x++) {
+                image.setPixelColor(0x000000ff, x, y + offset);
+            }
         }
     }
-    lines.push('└───────┴───────┴───────┘');
-    return lines;
+    for (let col = 0; col < 10; col++) {
+        const thickness = col % 3 === 0 ? 4 : 1;
+        const x = Math.round(GRID_LEFT + col * CELL_SIZE);
+        for (let offset = 0; offset < thickness; offset++) {
+            for (let y = GRID_TOP; y <= GRID_TOP + GRID_SIZE; y++) {
+                image.setPixelColor(0x000000ff, x + offset, y);
+            }
+        }
+    }
+
+    for (let row = 0; row < 9; row++) {
+        const cells = grid[row];
+        if (!cells) throw new Error(`Missing Sudoku row ${row + 1}`);
+        for (let col = 0; col < 9; col++) {
+            const value = cells[col];
+            if (value === undefined || value === 0) continue;
+            const text = String(value);
+            const x = GRID_LEFT + col * CELL_SIZE + (CELL_SIZE - measureText(font, text)) / 2;
+            image.print({
+                font,
+                x,
+                y: GRID_TOP + row * CELL_SIZE + 9,
+                text,
+            });
+        }
+    }
+
+    const imagePath = join(tmpdir(), `windsor-sudoku-${process.pid}-${Date.now()}.png`);
+    await writeFile(imagePath, await image.getBuffer(JimpMime.png));
+    return imagePath;
 }
 
 async function printSudokuWorker(args: string, ctx: CommandRunContext): Promise<CommandResult> {
@@ -72,16 +99,20 @@ async function printSudokuWorker(args: string, ctx: CommandRunContext): Promise<
     const difficulty = args as Difficulty;
 
     const diff = difficulty || 'easy';
-    const grid = generateSudoku(diff as Difficulty);
-    const gridLines = renderSudokuGrid(grid);
-
-    const job: PrintJob = {
-        urls: [],
-        header: `Sudoku (${diff})`,
-        lines: gridLines,
-    };
-
-    await ctx.printJob(job);
+    const puzzles = await loadSudokus(diff as Exclude<Difficulty, ''>);
+    const grid = puzzles[Math.floor(Math.random() * puzzles.length)];
+    if (!grid) throw new Error(`No Sudoku puzzles available for ${diff}`);
+    const imagePath = await renderSudokuImage(grid, diff as Exclude<Difficulty, ''>);
+    try {
+        const job: PrintJob = {
+            urls: [],
+            lines: [],
+            iconPath: imagePath,
+        };
+        await ctx.printJob(job);
+    } finally {
+        await unlink(imagePath);
+    }
 
     return {
         kind: "pass"
