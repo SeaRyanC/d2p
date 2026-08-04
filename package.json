@@ -13,6 +13,10 @@
   "bin": {
     "windsor-bot": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "assets"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/SeaRyanC/windsor-bot.git"
