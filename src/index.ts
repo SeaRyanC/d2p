@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-import { loadConfig, getCurrentConfig } from './config.ts';
+import { loadConfig } from './config.ts';
 import { logEvent, startDiagnosticsServer, setDiscordChannels, setRestartHandler, setRefreshChannelsHandler } from './server.ts';
 import { createWindsorBot, checkScheduledTasks } from './bot.ts';
 import { ChannelType } from 'discord.js';
+import type { WindsorConfig } from './types.ts';
 
-const config = getCurrentConfig();
+const { config } = await loadConfig();
 
 startDiagnosticsServer(config.diagnosticsPort);
 
 let bot: ReturnType<typeof createWindsorBot> | null = null;
 let startInFlight = false;
 
-async function startBot(): Promise<void> {
+async function startBot(cfg: WindsorConfig): Promise<void> {
     if (startInFlight) return;
-    const cfg = getCurrentConfig();
     if (!cfg.discordToken) {
         logEvent('info', 'No Discord token configured. Visit the control panel to set up.');
         return;
@@ -58,8 +58,8 @@ export async function restartBot(): Promise<void> {
         bot = null;
     }
     setDiscordChannels([]);
-    await loadConfig();
-    await startBot();
+    const { config } = await loadConfig();
+    await startBot(config);
 }
 
 // Recurring task checker
@@ -95,4 +95,4 @@ async function refreshChannels(): Promise<void> {
 }
 
 setRefreshChannelsHandler(refreshChannels);
-await startBot();
+await startBot(config);

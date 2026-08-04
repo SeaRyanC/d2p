@@ -118,6 +118,13 @@ npm run dev
 
 Then open `http://localhost:8080` to use the web control panel.
 
+When installed globally, run `windsor-bot` from the directory containing
+`windsor.config.json`, or set `WINDSOR_CONFIG_PATH` to its full path:
+
+```bash
+WINDSOR_CONFIG_PATH=/path/to/windsor.config.json windsor-bot
+```
+
 The control panel is a Preact app served by the diagnostics server and can:
 
 1. Show runtime bot status and recent events.
