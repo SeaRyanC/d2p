@@ -422,9 +422,7 @@ export function createWindsorBot(): WindsorBotHandle {
 
         if (config.includeIcon) {
             const iconCacheDir = getCurrentConfig().iconCacheDir ?? './icon-cache';
-            const iconPath = await generateIcon(strippedText, iconCacheDir, () =>
-                reactSafe(message, Reaction.thinking)
-            );
+            const iconPath = await generateIcon(strippedText, iconCacheDir);
             if (iconPath) job.iconPath = iconPath;
         }
 
@@ -529,9 +527,7 @@ export function createWindsorBot(): WindsorBotHandle {
         const rawContent = message.content;
 
         try {
-            const parsed = await parseRecurringSchedule(rawContent, new Date(), () =>
-                reactSafe(message, Reaction.thinking)
-            );
+            const parsed = await parseRecurringSchedule(rawContent, new Date());
             if (!parsed) {
                 await reactSafe(message, Reaction.what);
                 await replySafe(message, '⁉️ Could not parse a schedule from your message. Please try again with a clearer schedule.');
@@ -574,9 +570,7 @@ export function createWindsorBot(): WindsorBotHandle {
         }
         if (config.includeIcon) {
             const iconCacheDir = getCurrentConfig().iconCacheDir ?? './icon-cache';
-            const iconPath = await generateIcon(strippedText, iconCacheDir, () =>
-                reactSafe(scheduleReply, Reaction.thinking)
-            );
+            const iconPath = await generateIcon(strippedText, iconCacheDir);
             if (iconPath) job.iconPath = iconPath;
         }
 
@@ -599,9 +593,7 @@ export function createWindsorBot(): WindsorBotHandle {
         logEvent('print', `Printed recurring task: ${text}`);
 
         const originalUserMessage = scheduleReply.content.replace(/^Got it\. I will print ⟪.+?⟫ at /, '');
-        const nextOccurrence = await getNextOccurrence(originalUserMessage, new Date(), () =>
-            reactSafe(scheduleReply, Reaction.thinking)
-        );
+        const nextOccurrence = await getNextOccurrence(originalUserMessage, new Date());
 
         let statusReply: Message | null;
         if (!nextOccurrence) {
@@ -629,9 +621,7 @@ export function createWindsorBot(): WindsorBotHandle {
         const match = /⟪(.+?)⟫/.exec(scheduleReply.content);
         if (!match?.[1]) return;
 
-        const nextOccurrence = await getNextOccurrence(match[1], new Date(), () =>
-            reactSafe(latestStatusReply, Reaction.thinking)
-        );
+        const nextOccurrence = await getNextOccurrence(match[1], new Date());
         if (!nextOccurrence) {
             await replySafe(latestStatusReply, 'This occurrence has expired and no more prints are scheduled');
             await removeReactionSafe(latestStatusReply, Reaction.thinking);
