@@ -10,7 +10,8 @@
     "clean": "node scripts/clean.mjs",
     "dev": "node src/index.ts",
     "test": "node --test src/tests/*.test.ts",
-    "generate-wordsearches": "node scripts/generate-wordsearches.mjs"
+    "generate-wordsearches": "node scripts/generate-wordsearches.mjs",
+    "gen-image": "node scripts/generate-image.mjs"
   },
   "bin": {
     "windsor-bot": "dist/index.js"

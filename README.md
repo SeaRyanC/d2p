@@ -374,6 +374,7 @@ contributors working from the source tree:
 npm run dev     # run Windsor and the diagnostics server
 npm run build   # type-check and build the web panel
 npm test        # run the Node test suite
+npm run gen-image -- a friendly shopping list      # generate test.png using the local config
 ```
 
 The control-panel source is `src/web/app.tsx`. The browser app is bundled into

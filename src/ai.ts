@@ -73,11 +73,7 @@ function parseOccurrenceDate(str: string): Date | null {
     return null;
 }
 
-export async function parseRecurringSchedule(
-    userMessage: string,
-    now: Date,
-    onRemoteStart?: () => Promise<void>,
-): Promise<ParsedSchedule | null> {
+export async function parseRecurringSchedule(userMessage: string, now: Date): Promise<ParsedSchedule | null> {
     const client = getClient();
     if (!client) return null;
 
@@ -89,7 +85,6 @@ export async function parseRecurringSchedule(
     const results: ScheduleResult[] = [];
     const ATTEMPTS = 5;
 
-    await onRemoteStart?.();
     for (let i = 0; i < ATTEMPTS; i++) {
         try {
             const completion = await client.chat.completions.create({
@@ -154,20 +149,12 @@ function formatScheduleDate(date: Date): string {
 
 export { formatScheduleDate };
 
-export async function getNextOccurrence(
-    originalMessage: string,
-    now: Date,
-    onRemoteStart?: () => Promise<void>,
-): Promise<Date | null> {
-    const result = await parseRecurringSchedule(originalMessage, now, onRemoteStart);
+export async function getNextOccurrence(originalMessage: string, now: Date): Promise<Date | null> {
+    const result = await parseRecurringSchedule(originalMessage, now);
     return result ? result.nextOccurrence : null;
 }
 
-export async function generateIcon(
-    text: string,
-    cacheDir: string,
-    onRemoteStart?: () => Promise<void>,
-): Promise<string | null> {
+export async function generateIcon(text: string, cacheDir: string): Promise<string | null> {
     const prompt = `Black-on-transparent line drawing icon for the TODO item: "${text}". Do not produce any text. Use big, thick lines. No fine detailing.`;
     const hash = createHash('sha1').update(prompt).digest('hex').slice(0, 9);
     const filename = `${hash}.png`;
@@ -186,7 +173,6 @@ export async function generateIcon(
 
     if (await isOverTokenLimit()) return null;
 
-    await onRemoteStart?.();
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
             const response = await client.images.generate({
