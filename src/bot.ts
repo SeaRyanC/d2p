@@ -421,6 +421,7 @@ export function createWindsorBot(): WindsorBotHandle {
         }
 
         if (config.includeIcon) {
+            await replySafe(message, Reaction.thinking);
             const iconCacheDir = getCurrentConfig().iconCacheDir ?? './icon-cache';
             const iconPath = await generateIcon(strippedText, iconCacheDir);
             if (iconPath) job.iconPath = iconPath;
@@ -443,6 +444,7 @@ export function createWindsorBot(): WindsorBotHandle {
             await replySafe(message, `⏸️ Print failed: ${err instanceof Error ? err.message : String(err)}`);
             logEvent('error', `Print failed: ${err}`);
         }
+        await removeReactionSafe(message, Reaction.thinking);
     }
 
     async function handleAccumulatingPrint(
