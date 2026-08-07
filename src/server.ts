@@ -1,6 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import { execFile } from 'child_process';
 import { build } from 'esbuild';
 import { readFile, stat } from 'fs/promises';
+import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -15,6 +18,7 @@ import type { DiagnosticEvent, BotStatus, PrintConfig } from './types.ts';
 
 const MAX_EVENTS = 200;
 const events: DiagnosticEvent[] = [];
+const execFileAsync = promisify(execFile);
 
 export const status: BotStatus = {
     connected: false,
@@ -67,6 +71,39 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown): vo
         'Content-Length': Buffer.byteLength(body),
     });
     res.end(body);
+}
+
+async function readPackageVersion(): Promise<string> {
+    const runtimeDir = dirname(fileURLToPath(import.meta.url));
+    const packageJson = JSON.parse(await readFile(join(runtimeDir, '..', 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof packageJson.version !== 'string') throw new Error('package.json does not contain a valid version');
+    return packageJson.version;
+}
+
+async function updateGlobalBot(): Promise<string> {
+    await execFileAsync('npm', ['install', '-g', 'windsor-bot@latest']);
+    const { stdout } = await execFileAsync('npm', ['root', '-g']);
+    const packageJsonPath = join(stdout.trim(), 'windsor-bot', 'package.json');
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as { version?: unknown };
+    if (typeof packageJson.version !== 'string') throw new Error('Updated package does not contain a valid version');
+    return packageJson.version;
+}
+
+function hardRestart(): void {
+    const child = spawn('/bin/sh', [
+        '-c',
+        'sleep 1; exec "$@"',
+        'windsor-hard-restart',
+        process.execPath,
+        ...process.argv.slice(1),
+    ], {
+        detached: true,
+        stdio: 'inherit',
+        cwd: process.cwd(),
+        env: process.env,
+    });
+    child.unref();
+    setTimeout(() => process.kill(process.pid, 'SIGTERM'), 250);
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -216,6 +253,10 @@ export function startDiagnosticsServer(port: number): void {
                 sendJson(res, 200, status);
                 return;
             }
+            if (method === 'GET' && urlPath === '/api/version') {
+                sendJson(res, 200, { version: await readPackageVersion() });
+                return;
+            }
             if (method === 'GET' && urlPath === '/api/config') {
                 const cfg = getCurrentConfig();
                 sendJson(res, 200, {
@@ -338,6 +379,18 @@ export function startDiagnosticsServer(port: number): void {
                 if (_restartHandler) {
                     void _restartHandler();
                 }
+                return;
+            }
+            if (method === 'POST' && urlPath === '/api/update') {
+                const version = await updateGlobalBot();
+                logEvent('info', `Updated windsor-bot to version ${version}`);
+                sendJson(res, 200, { version });
+                return;
+            }
+            if (method === 'POST' && urlPath === '/api/hard-restart') {
+                logEvent('info', 'Hard restart requested via API');
+                sendJson(res, 200, { ok: true });
+                hardRestart();
                 return;
             }
 

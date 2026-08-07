@@ -49,6 +49,10 @@ interface ConfigData {
     configPath: string;
 }
 
+interface VersionData {
+    version: string;
+}
+
 interface ChannelsData {
     channels: ChannelMapping[];
     discordChannels: DiscordChannel[];
@@ -631,6 +635,15 @@ function RestartSection(): JSX.Element {
     const [msg, setMsg] = useState('');
     const [err, setErr] = useState('');
     const [restarting, setRestarting] = useState(false);
+    const [updating, setUpdating] = useState(false);
+    const [hardRestarting, setHardRestarting] = useState(false);
+    const [version, setVersion] = useState<string | null>(null);
+
+    useEffect(() => {
+        void apiFetch<VersionData>('/api/version')
+            .then(data => setVersion(data.version))
+            .catch(e => setErr(e instanceof Error ? e.message : String(e)));
+    }, []);
 
     async function restart(): Promise<void> {
         setRestarting(true); setErr(''); setMsg('');
@@ -643,13 +656,46 @@ function RestartSection(): JSX.Element {
         }
     }
 
+    async function update(): Promise<void> {
+        setUpdating(true); setErr(''); setMsg('');
+        try {
+            const data = await jsonPost<VersionData>('/api/update', {});
+            setVersion(data.version);
+            window.alert(`Windsor bot updated to version ${data.version}.`);
+            setMsg(`Updated to version ${data.version}.`);
+        } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+        } finally {
+            setUpdating(false);
+        }
+    }
+
+    async function hardRestart(): Promise<void> {
+        if (!window.confirm('Hard reboot the server now? The current process will be killed.')) return;
+        setHardRestarting(true); setErr(''); setMsg('');
+        try {
+            await jsonPost('/api/hard-restart', {});
+            setMsg('Hard reboot started.');
+        } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+            setHardRestarting(false);
+        }
+    }
+
     return (
         <section style={S.box}>
             <h2 style={{ marginTop: 0 }}>Server Control</h2>
+            <p>Version: <span style={S.mono}>{version ?? 'Loading…'}</span></p>
             {err && <p style={S.err}>{err}</p>}
             {msg && <p style={S.ok}>{msg}</p>}
             <button style={{ ...S.btn, background: '#8a6d00' }} onClick={() => void restart()} disabled={restarting}>
                 {restarting ? 'Restarting…' : 'Restart Server'}
+            </button>
+            <button style={S.btn} onClick={() => void update()} disabled={updating}>
+                {updating ? 'Updating…' : 'Update Bot'}
+            </button>
+            <button style={{ ...S.btn, background: '#c0392b' }} onClick={() => void hardRestart()} disabled={hardRestarting}>
+                {hardRestarting ? 'Rebooting…' : 'Hard Reboot'}
             </button>
         </section>
     );
