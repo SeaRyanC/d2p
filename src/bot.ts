@@ -421,7 +421,7 @@ export function createWindsorBot(): WindsorBotHandle {
         }
 
         if (config.includeIcon) {
-            await replySafe(message, Reaction.thinking);
+            await reactSafe(message, Reaction.thinking);
             const iconCacheDir = getCurrentConfig().iconCacheDir ?? './icon-cache';
             const iconPath = await generateIcon(strippedText, iconCacheDir);
             if (iconPath) job.iconPath = iconPath;
